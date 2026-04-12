@@ -36,10 +36,16 @@ jobs:
             patchelf \
             xdg-utils
 
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: 22
+          cache: 'pnpm'
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
@@ -52,11 +58,12 @@ jobs:
           workspaces: src-tauri -> src-tauri/target
 
       - name: Install frontend dependencies
-        run: npm install
+        run: pnpm install --frozen-lockfile
 
       - name: Build with Tauri
         uses: tauri-apps/tauri-action@v0
         env:
+          NODE_OPTIONS: '--max_old_space_size=4096'
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAURI_PRIVATE_KEY: ${{ secrets.TAURI_PRIVATE_KEY }}
           TAURI_KEY_PASSWORD: ${{ secrets.TAURI_KEY_PASSWORD }}
@@ -66,4 +73,5 @@ jobs:
           releaseBody: 'See [CHANGELOG](https://github.com/laohuoji-dev/laohuoji/blob/main/CHANGELOG.md)'
           releaseDraft: false
           prerelease: false
+          tauriScript: pnpm
           args: --target ${{ matrix.target }}
