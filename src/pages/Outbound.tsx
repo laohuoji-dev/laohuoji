@@ -97,6 +97,7 @@ const Outbound = () => {
   const selectedProductId = Form.useWatch('product_id', form);
   const selectedProduct = products.find((p) => p.id === selectedProductId);
   const quantity = Form.useWatch('quantity', form);
+  const price = Form.useWatch('price', form);
 
   // 自动填充销售价
   useEffect(() => {
@@ -201,10 +202,10 @@ const Outbound = () => {
             <Input placeholder="请输入客户名称（可选）" />
           </Form.Item>
 
-          {quantity && Form.useWatch('price', form) && (
+          {Number(quantity) > 0 && Number(price) > 0 && (
             <div style={{ marginBottom: 16, padding: 12, background: '#f5f5f5', borderRadius: 4 }}>
               <strong>总金额: </strong>
-              ¥{(quantity * (Form.useWatch('price', form) || 0)).toFixed(2)}
+              ¥{(Number(quantity) * Number(price || 0)).toFixed(2)}
             </div>
           )}
 

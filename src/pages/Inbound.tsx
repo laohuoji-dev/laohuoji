@@ -93,7 +93,10 @@ const Inbound = () => {
     }
   };
 
-  const selectedProduct = products.find((p) => p.id === Form.useWatch('product_id', form));
+  const selectedProductId = Form.useWatch('product_id', form);
+  const selectedProduct = products.find((p) => p.id === selectedProductId);
+  const quantity = Form.useWatch('quantity', form);
+  const price = Form.useWatch('price', form);
 
   const recordColumns = [
     { title: 'ID', dataIndex: 'id', width: 60 },
@@ -170,10 +173,10 @@ const Inbound = () => {
             <Input placeholder="请输入供应商名称（可选）" />
           </Form.Item>
 
-          {Form.useWatch('quantity', form) && Form.useWatch('price', form) && (
+          {Number(quantity) > 0 && Number(price) > 0 && (
             <div style={{ marginBottom: 16, padding: 12, background: '#f5f5f5', borderRadius: 4 }}>
               <strong>总金额: </strong>
-              ¥{((Form.useWatch('quantity', form) || 0) * (Form.useWatch('price', form) || 0)).toFixed(2)}
+              ¥{(Number(quantity) * Number(price || 0)).toFixed(2)}
             </div>
           )}
 
