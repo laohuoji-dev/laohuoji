@@ -1,4 +1,4 @@
-# 进销存系统
+# 老伙计 — 单机版进销存管理系统
 
 一个简单好用的单机版进销存软件，使用 Tauri + React + SQLite 构建。
 
@@ -62,18 +62,23 @@ curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 
 ## 安装与运行
 
-### 1. 安装 npm 依赖
+### 1. 克隆仓库
 ```bash
-cd inventory-app
+git clone git@github.com:laohuoji-dev/laohuoji.git
+cd laohuoji
+```
+
+### 2. 安装 npm 依赖
+```bash
 npm install
 ```
 
-### 2. 开发模式运行
+### 3. 开发模式运行
 ```bash
 npm run tauri dev
 ```
 
-### 3. 打包成应用
+### 4. 打包成应用
 ```bash
 # 打包当前平台应用
 npm run tauri build

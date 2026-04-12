@@ -1,0 +1,55 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <!-- 背景 -->
+  <rect width="512" height="512" rx="80" fill="#4A90D9"/>
+  
+  <!-- 身体/围裙 -->
+  <ellipse cx="256" cy="400" rx="110" ry="85" fill="#F5A623"/>
+  <rect x="165" y="335" width="182" height="75" rx="10" fill="#F5A623"/>
+  <rect x="190" y="350" width="132" height="12" rx="5" fill="#E8941A"/>
+  
+  <!-- 头 -->
+  <circle cx="256" cy="215" r="100" fill="#FFD93D"/>
+  
+  <!-- 耳朵 -->
+  <ellipse cx="172" cy="145" rx="30" ry="38" fill="#FFD93D"/>
+  <ellipse cx="172" cy="145" rx="18" ry="25" fill="#FFB84D"/>
+  <ellipse cx="340" cy="145" rx="30" ry="38" fill="#FFD93D"/>
+  <ellipse cx="340" cy="145" rx="18" ry="25" fill="#FFB84D"/>
+  
+  <!-- 眼睛 -->
+  <ellipse cx="220" cy="200" rx="20" ry="22" fill="white"/>
+  <ellipse cx="292" cy="200" rx="20" ry="22" fill="white"/>
+  <circle cx="224" cy="202" r="12" fill="#333"/>
+  <circle cx="296" cy="202" r="12" fill="#333"/>
+  <circle cx="228" cy="198" r="5" fill="white"/>
+  <circle cx="300" cy="198" r="5" fill="white"/>
+  
+  <!-- 腮红 -->
+  <ellipse cx="178" cy="240" rx="18" ry="10" fill="#FF9999" opacity="0.4"/>
+  <ellipse cx="334" cy="240" rx="18" ry="10" fill="#FF9999" opacity="0.4"/>
+  
+  <!-- 嘴巴 -->
+  <path d="M 230 255 Q 256 280 282 255" stroke="#333" stroke-width="6" fill="none" stroke-linecap="round"/>
+  
+  <!-- 胡须 -->
+  <line x1="165" y1="232" x2="200" y2="240" stroke="#CC9933" stroke-width="3" stroke-linecap="round"/>
+  <line x1="165" y1="248" x2="200" y2="248" stroke="#CC9933" stroke-width="3" stroke-linecap="round"/>
+  <line x1="312" y1="240" x2="347" y2="232" stroke="#CC9933" stroke-width="3" stroke-linecap="round"/>
+  <line x1="312" y1="248" x2="347" y2="248" stroke="#CC9933" stroke-width="3" stroke-linecap="round"/>
+  
+  <!-- 手 -->
+  <ellipse cx="140" cy="370" rx="25" ry="28" fill="#FFD93D"/>
+  <ellipse cx="372" cy="370" rx="25" ry="28" fill="#FFD93D"/>
+  
+  <!-- 账本 -->
+  <rect x="195" y="360" width="122" height="85" rx="5" fill="white" stroke="#E0E0E0" stroke-width="3"/>
+  <rect x="195" y="360" width="122" height="20" rx="5" fill="#E74C3C"/>
+  <line x1="210" y1="398" x2="302" y2="398" stroke="#DDD" stroke-width="3"/>
+  <line x1="210" y1="413" x2="302" y2="413" stroke="#DDD" stroke-width="3"/>
+  <line x1="210" y1="428" x2="270" y2="428" stroke="#DDD" stroke-width="3"/>
+  
+  <!-- 帽子 -->
+  <ellipse cx="256" cy="130" rx="85" ry="22" fill="#2ECC71"/>
+  <path d="M 180 130 Q 192 85 256 72 Q 320 85 332 130" fill="#2ECC71"/>
+  <circle cx="256" cy="78" r="12" fill="#F1C40F"/>
+</svg>
