@@ -341,6 +341,161 @@ impl Database {
         Ok(suggestions)
     }
 
+    // 获取销售趋势 - 近7天 vs 上月同期7天
+    pub fn get_sales_trend(&self) -> SqliteResult<serde_json::Value> {
+        // 最近7天销售额
+        let mut daily = Vec::new();
+        for i in (0..7).rev() {
+            let date: String = self.conn.query_row(
+                &format!("SELECT date('now', 'localtime', '-{} days')", i),
+                [],
+                |row| row.get(0),
+            )?;
+            let amount: f64 = self.conn.query_row(
+                "SELECT COALESCE(SUM(total), 0) FROM outbound_orders WHERE date(created_at) = ?",
+                [&date],
+                |row| row.get(0),
+            )?;
+            daily.push(serde_json::json!({ "date": date, "amount": amount }));
+        }
+
+        // 上月同期7天销售额
+        let mut last_period_daily = Vec::new();
+        for i in (0..7).rev() {
+            let date: String = self.conn.query_row(
+                &format!("SELECT date('now', 'localtime', '-1 month', '-{} days')", i),
+                [],
+                |row| row.get(0),
+            )?;
+            let amount: f64 = self.conn.query_row(
+                "SELECT COALESCE(SUM(total), 0) FROM outbound_orders WHERE date(created_at) = ?",
+                [&date],
+                |row| row.get(0),
+            )?;
+            last_period_daily.push(serde_json::json!({ "date": date, "amount": amount }));
+        }
+
+        Ok(serde_json::json!({
+            "daily": daily,
+            "last_period_daily": last_period_daily,
+        }))
+    }
+
+    // 获取滞销商品 - 指定天数内没有出库记录
+    pub fn get_slow_moving_products(&self, days: i32) -> SqliteResult<Vec<serde_json::Value>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT p.id, p.name, p.category, p.stock, p.unit,
+                    COALESCE(MAX(o.created_at), '无记录') as last_outbound
+             FROM products p
+             LEFT JOIN outbound_orders o ON p.id = o.product_id
+             GROUP BY p.id
+             HAVING last_outbound = '无记录'
+                OR julianday('now', 'localtime') - julianday(last_outbound) > ?
+             ORDER BY last_outbound ASC"
+        )?;
+
+        let rows = stmt.query_map([days], |row| {
+            Ok(serde_json::json!({
+                "id": row.get::<_, i64>(0)?,
+                "name": row.get::<_, String>(1)?,
+                "category": row.get::<_, String>(2)?,
+                "stock": row.get::<_, i32>(3)?,
+                "unit": row.get::<_, String>(4)?,
+                "last_outbound": row.get::<_, String>(5)?,
+            }))
+        })?;
+
+        let mut products = Vec::new();
+        for row in rows {
+            products.push(row?);
+        }
+        Ok(products)
+    }
+
+    // 获取经营周报数据
+    pub fn get_weekly_report(&self) -> SqliteResult<serde_json::Value> {
+        // 本周数据
+        let current_sales: f64 = self.conn.query_row(
+            "SELECT COALESCE(SUM(total), 0) FROM outbound_orders WHERE created_at >= date('now', 'localtime', 'weekday 0', '-6 days')",
+            [],
+            |row| row.get(0),
+        )?;
+        let current_purchase: f64 = self.conn.query_row(
+            "SELECT COALESCE(SUM(total), 0) FROM inbound_orders WHERE created_at >= date('now', 'localtime', 'weekday 0', '-6 days')",
+            [],
+            |row| row.get(0),
+        )?;
+        let current_profit: f64 = self.conn.query_row(
+            "SELECT COALESCE(SUM(ob.quantity * (ob.price - p.cost_price)), 0)
+             FROM outbound_orders ob JOIN products p ON ob.product_id = p.id
+             WHERE ob.created_at >= date('now', 'localtime', 'weekday 0', '-6 days')",
+            [],
+            |row| row.get(0),
+        )?;
+        let current_new_products: i64 = self.conn.query_row(
+            "SELECT COUNT(*) FROM products WHERE created_at >= date('now', 'localtime', 'weekday 0', '-6 days')",
+            [],
+            |row| row.get(0),
+        )?;
+        let current_inbound_count: i64 = self.conn.query_row(
+            "SELECT COUNT(*) FROM inbound_orders WHERE created_at >= date('now', 'localtime', 'weekday 0', '-6 days')",
+            [],
+            |row| row.get(0),
+        )?;
+        let current_outbound_count: i64 = self.conn.query_row(
+            "SELECT COUNT(*) FROM outbound_orders WHERE created_at >= date('now', 'localtime', 'weekday 0', '-6 days')",
+            [],
+            |row| row.get(0),
+        )?;
+
+        // 上周数据
+        let previous_sales: f64 = self.conn.query_row(
+            "SELECT COALESCE(SUM(total), 0) FROM outbound_orders WHERE created_at >= date('now', 'localtime', 'weekday 0', '-13 days') AND created_at < date('now', 'localtime', 'weekday 0', '-6 days')",
+            [],
+            |row| row.get(0),
+        )?;
+        let previous_purchase: f64 = self.conn.query_row(
+            "SELECT COALESCE(SUM(total), 0) FROM inbound_orders WHERE created_at >= date('now', 'localtime', 'weekday 0', '-13 days') AND created_at < date('now', 'localtime', 'weekday 0', '-6 days')",
+            [],
+            |row| row.get(0),
+        )?;
+        let previous_profit: f64 = self.conn.query_row(
+            "SELECT COALESCE(SUM(ob.quantity * (ob.price - p.cost_price)), 0)
+             FROM outbound_orders ob JOIN products p ON ob.product_id = p.id
+             WHERE ob.created_at >= date('now', 'localtime', 'weekday 0', '-13 days') AND ob.created_at < date('now', 'localtime', 'weekday 0', '-6 days')",
+            [],
+            |row| row.get(0),
+        )?;
+        let previous_inbound_count: i64 = self.conn.query_row(
+            "SELECT COUNT(*) FROM inbound_orders WHERE created_at >= date('now', 'localtime', 'weekday 0', '-13 days') AND created_at < date('now', 'localtime', 'weekday 0', '-6 days')",
+            [],
+            |row| row.get(0),
+        )?;
+        let previous_outbound_count: i64 = self.conn.query_row(
+            "SELECT COUNT(*) FROM outbound_orders WHERE created_at >= date('now', 'localtime', 'weekday 0', '-13 days') AND created_at < date('now', 'localtime', 'weekday 0', '-6 days')",
+            [],
+            |row| row.get(0),
+        )?;
+
+        Ok(serde_json::json!({
+            "current": {
+                "sales": current_sales,
+                "purchase": current_purchase,
+                "profit": current_profit,
+                "new_products": current_new_products,
+                "inbound_count": current_inbound_count,
+                "outbound_count": current_outbound_count,
+            },
+            "previous": {
+                "sales": previous_sales,
+                "purchase": previous_purchase,
+                "profit": previous_profit,
+                "inbound_count": previous_inbound_count,
+                "outbound_count": previous_outbound_count,
+            }
+        }))
+    }
+
     // 获取低库存预警商品
     pub fn get_low_stock_products(&self) -> SqliteResult<Vec<serde_json::Value>> {
         let mut stmt = self.conn.prepare(

@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react';
 import { Card, Row, Col, Statistic, Button, List, Tag } from 'antd';
-import { AppstoreOutlined, DollarOutlined, ShoppingCartOutlined, RiseOutlined, ReloadOutlined, WarningOutlined } from '@ant-design/icons';
+import { AppstoreOutlined, DollarOutlined, ShoppingCartOutlined, RiseOutlined, ReloadOutlined, WarningOutlined, ClockCircleOutlined } from '@ant-design/icons';
 import { invoke } from '@tauri-apps/api/core';
+import SalesTrend from '../components/SalesTrend';
 
 interface Statistics {
   product_count: number;
@@ -19,6 +20,15 @@ interface LowStockProduct {
   stock: number;
 }
 
+interface SlowMovingProduct {
+  id: number;
+  name: string;
+  category: string;
+  stock: number;
+  unit: string;
+  last_outbound: string;
+}
+
 const Dashboard = () => {
   const [stats, setStats] = useState<Statistics>({
     product_count: 0,
@@ -28,11 +38,13 @@ const Dashboard = () => {
     monthly_profit: 0,
   });
   const [lowStockProducts, setLowStockProducts] = useState<LowStockProduct[]>([]);
+  const [slowMovingProducts, setSlowMovingProducts] = useState<SlowMovingProduct[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     loadStatistics();
     loadLowStockProducts();
+    loadSlowMovingProducts();
   }, []);
 
   const loadStatistics = async () => {
@@ -56,11 +68,20 @@ const Dashboard = () => {
     }
   };
 
+  const loadSlowMovingProducts = async () => {
+    try {
+      const data = await invoke<SlowMovingProduct[]>('get_slow_moving_products', { days: 30 });
+      setSlowMovingProducts(data);
+    } catch (error) {
+      console.error('Failed to load slow moving products:', error);
+    }
+  };
+
   return (
     <div>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
         <h2>数据概览</h2>
-        <Button icon={<ReloadOutlined />} onClick={() => { loadStatistics(); loadLowStockProducts(); }} loading={loading}>
+        <Button icon={<ReloadOutlined />} onClick={() => { loadStatistics(); loadLowStockProducts(); loadSlowMovingProducts(); }} loading={loading}>
           刷新
         </Button>
       </div>
@@ -143,6 +164,37 @@ const Dashboard = () => {
                   description={item.category ? `分类: ${item.category}` : ''}
                 />
                 <Tag color="red">库存: {item.stock} {item.unit}</Tag>
+              </List.Item>
+            )}
+          />
+        </Card>
+      )}
+      <SalesTrend />
+      {slowMovingProducts.length > 0 && (
+        <Card
+          title={
+            <span>
+              <ClockCircleOutlined style={{ color: '#faad14', marginRight: 8 }} />
+              滞销商品预警
+              <Tag color="orange" style={{ marginLeft: 8 }}>{slowMovingProducts.length} 个商品</Tag>
+            </span>
+          }
+          style={{ marginTop: 16 }}
+          styles={{ body: { padding: 0 } }}
+        >
+          <List
+            size="small"
+            dataSource={slowMovingProducts}
+            renderItem={(item) => (
+              <List.Item>
+                <List.Item.Meta
+                  title={item.name}
+                  description={item.category ? `分类: ${item.category}` : ''}
+                />
+                <div style={{ textAlign: 'right' }}>
+                  <div><Tag color="orange">库存: {item.stock} {item.unit}</Tag></div>
+                  <div style={{ fontSize: 12, color: '#999', marginTop: 4 }}>最后出库: {item.last_outbound}</div>
+                </div>
               </List.Item>
             )}
           />
