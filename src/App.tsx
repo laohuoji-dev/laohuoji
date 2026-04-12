@@ -87,8 +87,8 @@ function App() {
   return (
     <Layout style={{ minHeight: '100vh' }}>
       <Sider
-        breakpoint="lg"
-        collapsedWidth="0"
+        breakpoint="md"
+        collapsedWidth={0}
         style={{
           overflow: 'auto',
           height: '100vh',
