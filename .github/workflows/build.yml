@@ -73,5 +73,5 @@ jobs:
           releaseBody: 'See [CHANGELOG](https://github.com/laohuoji-dev/laohuoji/blob/main/CHANGELOG.md)'
           releaseDraft: false
           prerelease: false
-          tauriScript: pnpm
+          tauriScript: pnpm tauri
           args: --target ${{ matrix.target }}
