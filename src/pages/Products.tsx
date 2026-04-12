@@ -2,6 +2,7 @@ import { useEffect, useState, useRef } from 'react';
 import { Table, Button, Modal, Form, Input, InputNumber, Space, message, Popconfirm } from 'antd';
 import { PlusOutlined, EditOutlined, DeleteOutlined, SearchOutlined } from '@ant-design/icons';
 import { invoke } from '@tauri-apps/api/core';
+import { getFirstLetter, toPinyin } from '../utils/pinyin';
 
 interface Product {
   id: number;
@@ -42,10 +43,19 @@ const Products = () => {
     if (!searchText) {
       setFilteredProducts(products);
     } else {
-      const filtered = products.filter(p => 
-        p.name.toLowerCase().includes(searchText.toLowerCase()) ||
-        (p.category && p.category.toLowerCase().includes(searchText.toLowerCase()))
-      );
+      const searchLower = searchText.toLowerCase();
+      const filtered = products.filter(p => {
+        // Match original text
+        if (p.name.toLowerCase().includes(searchLower)) return true;
+        if (p.category && p.category.toLowerCase().includes(searchLower)) return true;
+        // Match pinyin first letter
+        if (getFirstLetter(p.name).includes(searchLower)) return true;
+        if (p.category && getFirstLetter(p.category).includes(searchLower)) return true;
+        // Match full pinyin
+        if (toPinyin(p.name).includes(searchLower)) return true;
+        if (p.category && toPinyin(p.category).includes(searchLower)) return true;
+        return false;
+      });
       setFilteredProducts(filtered);
     }
   }, [searchText, products]);

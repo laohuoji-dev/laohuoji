@@ -177,6 +177,30 @@ async fn get_product_suggestions(name: String, state: State<'_, AppState>) -> Re
     db.get_product_suggestions(&name).map_err(|e| e.to_string())
 }
 
+// 销售趋势命令
+#[tauri::command]
+async fn get_sales_trend(state: State<'_, AppState>) -> Result<serde_json::Value, String> {
+    let db_guard = state.db.lock().map_err(|e| e.to_string())?;
+    let db = db_guard.as_ref().ok_or("数据库未初始化")?;
+    db.get_sales_trend().map_err(|e| e.to_string())
+}
+
+// 滞销商品命令
+#[tauri::command]
+async fn get_slow_moving_products(days: i32, state: State<'_, AppState>) -> Result<Vec<serde_json::Value>, String> {
+    let db_guard = state.db.lock().map_err(|e| e.to_string())?;
+    let db = db_guard.as_ref().ok_or("数据库未初始化")?;
+    db.get_slow_moving_products(days).map_err(|e| e.to_string())
+}
+
+// 经营周报命令
+#[tauri::command]
+async fn get_weekly_report(state: State<'_, AppState>) -> Result<serde_json::Value, String> {
+    let db_guard = state.db.lock().map_err(|e| e.to_string())?;
+    let db = db_guard.as_ref().ok_or("数据库未初始化")?;
+    db.get_weekly_report().map_err(|e| e.to_string())
+}
+
 // 库存预警命令
 #[tauri::command]
 async fn get_low_stock_products(state: State<'_, AppState>) -> Result<Vec<serde_json::Value>, String> {
@@ -222,6 +246,9 @@ pub fn run() {
             add_outbound,
             get_statistics,
             get_product_suggestions,
+            get_sales_trend,
+            get_slow_moving_products,
+            get_weekly_report,
             get_low_stock_products,
             get_inbound_records,
             get_outbound_records,
