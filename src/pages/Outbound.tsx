@@ -4,6 +4,7 @@ import { SendOutlined, DownloadOutlined } from '@ant-design/icons';
 import { invoke } from '@tauri-apps/api/core';
 import type { Dayjs } from 'dayjs';
 import * as XLSX from 'xlsx';
+import { getTauriErrorMessage } from '../utils/tauriError';
 
 interface Product {
   id: number;
@@ -87,7 +88,7 @@ const Outbound = () => {
       loadProducts();
       loadRecords();
     } catch (error: any) {
-      message.error(error || '出库失败');
+      message.error(getTauriErrorMessage(error) || '出库失败');
       console.error(error);
     } finally {
       setSubmitting(false);

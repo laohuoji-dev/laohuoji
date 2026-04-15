@@ -1,7 +1,9 @@
 mod db;
+mod error;
 
 use bcrypt::{hash, verify, DEFAULT_COST};
 use db::Database;
+use error::AppError;
 use serde::{Deserialize, Serialize};
 use std::sync::Mutex;
 use tauri::{AppHandle, State};
@@ -40,62 +42,93 @@ struct OutboundOrder {
 
 // 密码相关命令
 #[tauri::command]
-async fn init_database(app: AppHandle, state: State<'_, AppState>) -> Result<(), String> {
-    let db = Database::new(&app).map_err(|e| e.to_string())?;
+async fn init_database(app: AppHandle, state: State<'_, AppState>) -> Result<(), AppError> {
+    let db = Database::new(&app)?;
 
-    let mut db_guard = state.db.lock().map_err(|e| e.to_string())?;
+    let mut db_guard = state
+        .db
+        .lock()
+        .map_err(|e| AppError::new("LOCK_ERROR", e.to_string()))?;
     *db_guard = Some(db);
 
     Ok(())
 }
 
 #[tauri::command]
-async fn has_password(state: State<'_, AppState>) -> Result<bool, String> {
-    let db_guard = state.db.lock().map_err(|e| e.to_string())?;
-    let db = db_guard.as_ref().ok_or("数据库未初始化")?;
-    db.has_password().map_err(|e| e.to_string())
+async fn has_password(state: State<'_, AppState>) -> Result<bool, AppError> {
+    let db_guard = state
+        .db
+        .lock()
+        .map_err(|e| AppError::new("LOCK_ERROR", e.to_string()))?;
+    let db = db_guard
+        .as_ref()
+        .ok_or_else(|| AppError::new("DB_NOT_INIT", "数据库未初始化"))?;
+    db.has_password()
 }
 
 #[tauri::command]
-async fn setup_password(password: String, state: State<'_, AppState>) -> Result<(), String> {
-    let db_guard = state.db.lock().map_err(|e| e.to_string())?;
-    let db = db_guard.as_ref().ok_or("数据库未初始化")?;
+async fn setup_password(password: String, state: State<'_, AppState>) -> Result<(), AppError> {
+    let db_guard = state
+        .db
+        .lock()
+        .map_err(|e| AppError::new("LOCK_ERROR", e.to_string()))?;
+    let db = db_guard
+        .as_ref()
+        .ok_or_else(|| AppError::new("DB_NOT_INIT", "数据库未初始化"))?;
 
-    let hashed = hash(&password, DEFAULT_COST).map_err(|e| e.to_string())?;
-    db.set_password(&hashed).map_err(|e| e.to_string())?;
+    let hashed = hash(&password, DEFAULT_COST)
+        .map_err(|e| AppError::new("PASSWORD_HASH_ERROR", e.to_string()))?;
+    db.set_password(&hashed)?;
 
     Ok(())
 }
 
 #[tauri::command]
-async fn verify_password(password: String, state: State<'_, AppState>) -> Result<bool, String> {
-    let db_guard = state.db.lock().map_err(|e| e.to_string())?;
-    let db = db_guard.as_ref().ok_or("数据库未初始化")?;
+async fn verify_password(password: String, state: State<'_, AppState>) -> Result<bool, AppError> {
+    let db_guard = state
+        .db
+        .lock()
+        .map_err(|e| AppError::new("LOCK_ERROR", e.to_string()))?;
+    let db = db_guard
+        .as_ref()
+        .ok_or_else(|| AppError::new("DB_NOT_INIT", "数据库未初始化"))?;
 
-    let stored_hash = db.get_password_hash().map_err(|e| e.to_string())?;
+    let stored_hash = db.get_password_hash()?;
 
     match stored_hash {
-        Some(hash) => verify(&password, &hash).map_err(|e| e.to_string()),
+        Some(hash) => verify(&password, &hash)
+            .map_err(|e| AppError::new("PASSWORD_VERIFY_ERROR", e.to_string())),
         None => Ok(false),
     }
 }
 
 #[tauri::command]
-async fn change_password(password: String, state: State<'_, AppState>) -> Result<(), String> {
-    let db_guard = state.db.lock().map_err(|e| e.to_string())?;
-    let db = db_guard.as_ref().ok_or("数据库未初始化")?;
+async fn change_password(password: String, state: State<'_, AppState>) -> Result<(), AppError> {
+    let db_guard = state
+        .db
+        .lock()
+        .map_err(|e| AppError::new("LOCK_ERROR", e.to_string()))?;
+    let db = db_guard
+        .as_ref()
+        .ok_or_else(|| AppError::new("DB_NOT_INIT", "数据库未初始化"))?;
 
-    let hashed = hash(&password, DEFAULT_COST).map_err(|e| e.to_string())?;
-    db.set_password(&hashed).map_err(|e| e.to_string())?;
+    let hashed = hash(&password, DEFAULT_COST)
+        .map_err(|e| AppError::new("PASSWORD_HASH_ERROR", e.to_string()))?;
+    db.set_password(&hashed)?;
 
     Ok(())
 }
 
 // 商品管理命令
 #[tauri::command]
-async fn add_product(product: Product, state: State<'_, AppState>) -> Result<i64, String> {
-    let db_guard = state.db.lock().map_err(|e| e.to_string())?;
-    let db = db_guard.as_ref().ok_or("数据库未初始化")?;
+async fn add_product(product: Product, state: State<'_, AppState>) -> Result<i64, AppError> {
+    let mut db_guard = state
+        .db
+        .lock()
+        .map_err(|e| AppError::new("LOCK_ERROR", e.to_string()))?;
+    let db = db_guard
+        .as_mut()
+        .ok_or_else(|| AppError::new("DB_NOT_INIT", "数据库未初始化"))?;
 
     db.add_product(
         &product.name,
@@ -105,13 +138,21 @@ async fn add_product(product: Product, state: State<'_, AppState>) -> Result<i64
         product.sell_price,
         product.stock,
     )
-    .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
-async fn update_product(id: i64, product: Product, state: State<'_, AppState>) -> Result<(), String> {
-    let db_guard = state.db.lock().map_err(|e| e.to_string())?;
-    let db = db_guard.as_ref().ok_or("数据库未初始化")?;
+async fn update_product(
+    id: i64,
+    product: Product,
+    state: State<'_, AppState>,
+) -> Result<(), AppError> {
+    let mut db_guard = state
+        .db
+        .lock()
+        .map_err(|e| AppError::new("LOCK_ERROR", e.to_string()))?;
+    let db = db_guard
+        .as_mut()
+        .ok_or_else(|| AppError::new("DB_NOT_INIT", "数据库未初始化"))?;
 
     db.update_product(
         id,
@@ -122,116 +163,201 @@ async fn update_product(id: i64, product: Product, state: State<'_, AppState>) -
         product.sell_price,
         product.stock,
     )
-    .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
-async fn delete_product(id: i64, state: State<'_, AppState>) -> Result<(), String> {
-    let db_guard = state.db.lock().map_err(|e| e.to_string())?;
-    let db = db_guard.as_ref().ok_or("数据库未初始化")?;
+async fn delete_product(id: i64, state: State<'_, AppState>) -> Result<(), AppError> {
+    let mut db_guard = state
+        .db
+        .lock()
+        .map_err(|e| AppError::new("LOCK_ERROR", e.to_string()))?;
+    let db = db_guard
+        .as_mut()
+        .ok_or_else(|| AppError::new("DB_NOT_INIT", "数据库未初始化"))?;
 
-    db.delete_product(id).map_err(|e| e.to_string())
+    db.delete_product(id)
 }
 
 #[tauri::command]
-async fn get_products(state: State<'_, AppState>) -> Result<Vec<serde_json::Value>, String> {
-    let db_guard = state.db.lock().map_err(|e| e.to_string())?;
-    let db = db_guard.as_ref().ok_or("数据库未初始化")?;
+async fn get_products(state: State<'_, AppState>) -> Result<Vec<serde_json::Value>, AppError> {
+    let db_guard = state
+        .db
+        .lock()
+        .map_err(|e| AppError::new("LOCK_ERROR", e.to_string()))?;
+    let db = db_guard
+        .as_ref()
+        .ok_or_else(|| AppError::new("DB_NOT_INIT", "数据库未初始化"))?;
 
-    db.get_products().map_err(|e| e.to_string())
+    db.get_products()
 }
 
 // 入库出库命令
 #[tauri::command]
-async fn add_inbound(order: InboundOrder, state: State<'_, AppState>) -> Result<i64, String> {
-    let db_guard = state.db.lock().map_err(|e| e.to_string())?;
-    let db = db_guard.as_ref().ok_or("数据库未初始化")?;
+async fn add_inbound(order: InboundOrder, state: State<'_, AppState>) -> Result<i64, AppError> {
+    let mut db_guard = state
+        .db
+        .lock()
+        .map_err(|e| AppError::new("LOCK_ERROR", e.to_string()))?;
+    let db = db_guard
+        .as_mut()
+        .ok_or_else(|| AppError::new("DB_NOT_INIT", "数据库未初始化"))?;
 
-    db.add_inbound(order.product_id, order.quantity, order.price, &order.supplier)
-        .map_err(|e| e.to_string())
+    db.add_inbound(
+        order.product_id,
+        order.quantity,
+        order.price,
+        &order.supplier,
+    )
 }
 
 #[tauri::command]
-async fn add_outbound(order: OutboundOrder, state: State<'_, AppState>) -> Result<i64, String> {
-    let db_guard = state.db.lock().map_err(|e| e.to_string())?;
-    let db = db_guard.as_ref().ok_or("数据库未初始化")?;
+async fn add_outbound(order: OutboundOrder, state: State<'_, AppState>) -> Result<i64, AppError> {
+    let mut db_guard = state
+        .db
+        .lock()
+        .map_err(|e| AppError::new("LOCK_ERROR", e.to_string()))?;
+    let db = db_guard
+        .as_mut()
+        .ok_or_else(|| AppError::new("DB_NOT_INIT", "数据库未初始化"))?;
 
-    db.add_outbound(order.product_id, order.quantity, order.price, &order.customer)
-        .map_err(|e| e.to_string())
+    db.add_outbound(
+        order.product_id,
+        order.quantity,
+        order.price,
+        &order.customer,
+    )
 }
 
 // 统计命令
 #[tauri::command]
-async fn get_statistics(state: State<'_, AppState>) -> Result<serde_json::Value, String> {
-    let db_guard = state.db.lock().map_err(|e| e.to_string())?;
-    let db = db_guard.as_ref().ok_or("数据库未初始化")?;
+async fn get_statistics(state: State<'_, AppState>) -> Result<serde_json::Value, AppError> {
+    let db_guard = state
+        .db
+        .lock()
+        .map_err(|e| AppError::new("LOCK_ERROR", e.to_string()))?;
+    let db = db_guard
+        .as_ref()
+        .ok_or_else(|| AppError::new("DB_NOT_INIT", "数据库未初始化"))?;
 
-    db.get_statistics().map_err(|e| e.to_string())
+    db.get_statistics()
 }
 
 // 智能补全命令
 #[tauri::command]
-async fn get_product_suggestions(name: String, state: State<'_, AppState>) -> Result<Vec<serde_json::Value>, String> {
-    let db_guard = state.db.lock().map_err(|e| e.to_string())?;
-    let db = db_guard.as_ref().ok_or("数据库未初始化")?;
-    db.get_product_suggestions(&name).map_err(|e| e.to_string())
+async fn get_product_suggestions(
+    name: String,
+    state: State<'_, AppState>,
+) -> Result<Vec<serde_json::Value>, AppError> {
+    let db_guard = state
+        .db
+        .lock()
+        .map_err(|e| AppError::new("LOCK_ERROR", e.to_string()))?;
+    let db = db_guard
+        .as_ref()
+        .ok_or_else(|| AppError::new("DB_NOT_INIT", "数据库未初始化"))?;
+    db.get_product_suggestions(&name)
 }
 
 // 销售趋势命令
 #[tauri::command]
-async fn get_sales_trend(state: State<'_, AppState>) -> Result<serde_json::Value, String> {
-    let db_guard = state.db.lock().map_err(|e| e.to_string())?;
-    let db = db_guard.as_ref().ok_or("数据库未初始化")?;
-    db.get_sales_trend().map_err(|e| e.to_string())
+async fn get_sales_trend(state: State<'_, AppState>) -> Result<serde_json::Value, AppError> {
+    let db_guard = state
+        .db
+        .lock()
+        .map_err(|e| AppError::new("LOCK_ERROR", e.to_string()))?;
+    let db = db_guard
+        .as_ref()
+        .ok_or_else(|| AppError::new("DB_NOT_INIT", "数据库未初始化"))?;
+    db.get_sales_trend()
 }
 
 // 滞销商品命令
 #[tauri::command]
-async fn get_slow_moving_products(days: i32, state: State<'_, AppState>) -> Result<Vec<serde_json::Value>, String> {
-    let db_guard = state.db.lock().map_err(|e| e.to_string())?;
-    let db = db_guard.as_ref().ok_or("数据库未初始化")?;
-    db.get_slow_moving_products(days).map_err(|e| e.to_string())
+async fn get_slow_moving_products(
+    days: i32,
+    state: State<'_, AppState>,
+) -> Result<Vec<serde_json::Value>, AppError> {
+    let db_guard = state
+        .db
+        .lock()
+        .map_err(|e| AppError::new("LOCK_ERROR", e.to_string()))?;
+    let db = db_guard
+        .as_ref()
+        .ok_or_else(|| AppError::new("DB_NOT_INIT", "数据库未初始化"))?;
+    db.get_slow_moving_products(days)
 }
 
 // 经营周报命令
 #[tauri::command]
-async fn get_weekly_report(state: State<'_, AppState>) -> Result<serde_json::Value, String> {
-    let db_guard = state.db.lock().map_err(|e| e.to_string())?;
-    let db = db_guard.as_ref().ok_or("数据库未初始化")?;
-    db.get_weekly_report().map_err(|e| e.to_string())
+async fn get_weekly_report(state: State<'_, AppState>) -> Result<serde_json::Value, AppError> {
+    let db_guard = state
+        .db
+        .lock()
+        .map_err(|e| AppError::new("LOCK_ERROR", e.to_string()))?;
+    let db = db_guard
+        .as_ref()
+        .ok_or_else(|| AppError::new("DB_NOT_INIT", "数据库未初始化"))?;
+    db.get_weekly_report()
 }
 
 // 库存预警命令
 #[tauri::command]
-async fn get_low_stock_products(state: State<'_, AppState>) -> Result<Vec<serde_json::Value>, String> {
-    let db_guard = state.db.lock().map_err(|e| e.to_string())?;
-    let db = db_guard.as_ref().ok_or("数据库未初始化")?;
+async fn get_low_stock_products(
+    state: State<'_, AppState>,
+) -> Result<Vec<serde_json::Value>, AppError> {
+    let db_guard = state
+        .db
+        .lock()
+        .map_err(|e| AppError::new("LOCK_ERROR", e.to_string()))?;
+    let db = db_guard
+        .as_ref()
+        .ok_or_else(|| AppError::new("DB_NOT_INIT", "数据库未初始化"))?;
 
-    db.get_low_stock_products().map_err(|e| e.to_string())
+    db.get_low_stock_products()
 }
 
 // 记录查询命令
 #[tauri::command]
-async fn get_inbound_records(start_date: Option<String>, end_date: Option<String>, state: State<'_, AppState>) -> Result<Vec<serde_json::Value>, String> {
-    let db_guard = state.db.lock().map_err(|e| e.to_string())?;
-    let db = db_guard.as_ref().ok_or("数据库未初始化")?;
+async fn get_inbound_records(
+    start_date: Option<String>,
+    end_date: Option<String>,
+    state: State<'_, AppState>,
+) -> Result<Vec<serde_json::Value>, AppError> {
+    let db_guard = state
+        .db
+        .lock()
+        .map_err(|e| AppError::new("LOCK_ERROR", e.to_string()))?;
+    let db = db_guard
+        .as_ref()
+        .ok_or_else(|| AppError::new("DB_NOT_INIT", "数据库未初始化"))?;
 
-    db.get_inbound_records(start_date.as_deref(), end_date.as_deref()).map_err(|e| e.to_string())
+    db.get_inbound_records(start_date.as_deref(), end_date.as_deref())
 }
 
 #[tauri::command]
-async fn get_outbound_records(start_date: Option<String>, end_date: Option<String>, state: State<'_, AppState>) -> Result<Vec<serde_json::Value>, String> {
-    let db_guard = state.db.lock().map_err(|e| e.to_string())?;
-    let db = db_guard.as_ref().ok_or("数据库未初始化")?;
+async fn get_outbound_records(
+    start_date: Option<String>,
+    end_date: Option<String>,
+    state: State<'_, AppState>,
+) -> Result<Vec<serde_json::Value>, AppError> {
+    let db_guard = state
+        .db
+        .lock()
+        .map_err(|e| AppError::new("LOCK_ERROR", e.to_string()))?;
+    let db = db_guard
+        .as_ref()
+        .ok_or_else(|| AppError::new("DB_NOT_INIT", "数据库未初始化"))?;
 
-    db.get_outbound_records(start_date.as_deref(), end_date.as_deref()).map_err(|e| e.to_string())
+    db.get_outbound_records(start_date.as_deref(), end_date.as_deref())
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
-        .manage(AppState { db: Mutex::new(None) })
+        .manage(AppState {
+            db: Mutex::new(None),
+        })
         .invoke_handler(tauri::generate_handler![
             init_database,
             has_password,

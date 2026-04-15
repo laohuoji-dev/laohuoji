@@ -1,4 +1,6 @@
-use rusqlite::{Connection, Result as SqliteResult};
+use crate::error::AppError;
+use rusqlite::{params, Connection};
+use std::time::Duration;
 use tauri::{AppHandle, Manager};
 
 pub struct Database {
@@ -6,26 +8,25 @@ pub struct Database {
 }
 
 impl Database {
-    pub fn new(app_handle: &AppHandle) -> SqliteResult<Self> {
-        // 获取应用数据目录
+    pub fn new(app_handle: &AppHandle) -> Result<Self, AppError> {
         let app_data_dir = app_handle
             .path()
             .app_data_dir()
-            .expect("Failed to get app data dir");
+            .map_err(|e| AppError::new("PATH_ERROR", e.to_string()))?;
 
-        // 创建目录（如果不存在）
-        std::fs::create_dir_all(&app_data_dir).expect("Failed to create app data dir");
+        std::fs::create_dir_all(&app_data_dir)?;
 
         let db_path = app_data_dir.join("inventory.db");
         let conn = Connection::open(db_path)?;
+        conn.execute_batch("PRAGMA foreign_keys = ON;")?;
+        conn.busy_timeout(Duration::from_secs(5))?;
 
         let db = Database { conn };
         db.init_tables()?;
         Ok(db)
     }
 
-    fn init_tables(&self) -> SqliteResult<()> {
-        // 密码表
+    fn init_tables(&self) -> Result<(), AppError> {
         self.conn.execute(
             "CREATE TABLE IF NOT EXISTS passwords (
                 id INTEGER PRIMARY KEY,
@@ -34,7 +35,6 @@ impl Database {
             [],
         )?;
 
-        // 商品表
         self.conn.execute(
             "CREATE TABLE IF NOT EXISTS products (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -50,7 +50,6 @@ impl Database {
             [],
         )?;
 
-        // 入库记录
         self.conn.execute(
             "CREATE TABLE IF NOT EXISTS inbound_orders (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -65,7 +64,6 @@ impl Database {
             [],
         )?;
 
-        // 出库记录
         self.conn.execute(
             "CREATE TABLE IF NOT EXISTS outbound_orders (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -83,13 +81,15 @@ impl Database {
         Ok(())
     }
 
-    pub fn has_password(&self) -> SqliteResult<bool> {
-        let mut stmt = self.conn.prepare("SELECT COUNT(*) as count FROM passwords")?;
+    pub fn has_password(&self) -> Result<bool, AppError> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT COUNT(*) as count FROM passwords")?;
         let count: i64 = stmt.query_row([], |row| row.get(0))?;
         Ok(count > 0)
     }
 
-    pub fn set_password(&self, password_hash: &str) -> SqliteResult<()> {
+    pub fn set_password(&self, password_hash: &str) -> Result<(), AppError> {
         self.conn.execute(
             "INSERT OR REPLACE INTO passwords (id, password_hash) VALUES (1, ?)",
             [password_hash],
@@ -97,39 +97,59 @@ impl Database {
         Ok(())
     }
 
-    pub fn get_password_hash(&self) -> SqliteResult<Option<String>> {
-        let mut stmt = self.conn.prepare("SELECT password_hash FROM passwords WHERE id = 1")?;
+    pub fn get_password_hash(&self) -> Result<Option<String>, AppError> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT password_hash FROM passwords WHERE id = 1")?;
         let result = stmt.query_row([], |row| row.get(0));
         match result {
             Ok(hash) => Ok(Some(hash)),
             Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
             Err(e) => Err(e),
         }
+        .map_err(Into::into)
     }
 
-    // 商品操作
-    pub fn add_product(&self, name: &str, category: &str, unit: &str, cost_price: f64, sell_price: f64, stock: i32) -> SqliteResult<i64> {
+    pub fn add_product(
+        &mut self,
+        name: &str,
+        category: &str,
+        unit: &str,
+        cost_price: f64,
+        sell_price: f64,
+        stock: i32,
+    ) -> Result<i64, AppError> {
         self.conn.execute(
             "INSERT INTO products (name, category, unit, cost_price, sell_price, stock) VALUES (?, ?, ?, ?, ?, ?)",
-            [name, category, unit, &cost_price.to_string(), &sell_price.to_string(), &stock.to_string()],
+            params![name, category, unit, cost_price, sell_price, stock],
         )?;
         Ok(self.conn.last_insert_rowid())
     }
 
-    pub fn update_product(&self, id: i64, name: &str, category: &str, unit: &str, cost_price: f64, sell_price: f64, stock: i32) -> SqliteResult<()> {
+    pub fn update_product(
+        &mut self,
+        id: i64,
+        name: &str,
+        category: &str,
+        unit: &str,
+        cost_price: f64,
+        sell_price: f64,
+        stock: i32,
+    ) -> Result<(), AppError> {
         self.conn.execute(
             "UPDATE products SET name = ?, category = ?, unit = ?, cost_price = ?, sell_price = ?, stock = ?, updated_at = datetime('now', 'localtime') WHERE id = ?",
-            [name, category, unit, &cost_price.to_string(), &sell_price.to_string(), &stock.to_string(), &id.to_string()],
+            params![name, category, unit, cost_price, sell_price, stock, id],
         )?;
         Ok(())
     }
 
-    pub fn delete_product(&self, id: i64) -> SqliteResult<()> {
-        self.conn.execute("DELETE FROM products WHERE id = ?", [&id.to_string()])?;
+    pub fn delete_product(&mut self, id: i64) -> Result<(), AppError> {
+        self.conn
+            .execute("DELETE FROM products WHERE id = ?", params![id])?;
         Ok(())
     }
 
-    pub fn get_products(&self) -> SqliteResult<Vec<serde_json::Value>> {
+    pub fn get_products(&self) -> Result<Vec<serde_json::Value>, AppError> {
         let mut stmt = self.conn.prepare(
             "SELECT id, name, category, unit, cost_price, sell_price, stock, created_at, updated_at FROM products ORDER BY id DESC"
         )?;
@@ -155,78 +175,79 @@ impl Database {
         Ok(products)
     }
 
-    // 入库操作
-    pub fn add_inbound(&self, product_id: i64, quantity: i32, price: f64, supplier: &str) -> SqliteResult<i64> {
+    pub fn add_inbound(
+        &mut self,
+        product_id: i64,
+        quantity: i32,
+        price: f64,
+        supplier: &str,
+    ) -> Result<i64, AppError> {
         let total = quantity as f64 * price;
 
-        // 开始事务
-        let tx = self.conn.unchecked_transaction()?;
+        let tx = self.conn.transaction()?;
 
-        // 添加入库记录
         tx.execute(
             "INSERT INTO inbound_orders (product_id, quantity, price, total, supplier) VALUES (?, ?, ?, ?, ?)",
-            [&product_id.to_string(), &quantity.to_string(), &price.to_string(), &total.to_string(), supplier],
+            params![product_id, quantity, price, total, supplier],
         )?;
+        let row_id = tx.last_insert_rowid();
 
-        // 更新库存
         tx.execute(
             "UPDATE products SET stock = stock + ?, updated_at = datetime('now', 'localtime') WHERE id = ?",
-            [&quantity.to_string(), &product_id.to_string()],
+            params![quantity, product_id],
         )?;
 
         tx.commit()?;
-        Ok(self.conn.last_insert_rowid())
+        Ok(row_id)
     }
 
-    // 出库操作
-    pub fn add_outbound(&self, product_id: i64, quantity: i32, price: f64, customer: &str) -> SqliteResult<i64> {
+    pub fn add_outbound(
+        &mut self,
+        product_id: i64,
+        quantity: i32,
+        price: f64,
+        customer: &str,
+    ) -> Result<i64, AppError> {
         let total = quantity as f64 * price;
 
-        // 开始事务
-        let tx = self.conn.unchecked_transaction()?;
+        let tx = self.conn.transaction()?;
 
-        // 检查库存
         let current_stock: i32 = tx.query_row(
             "SELECT stock FROM products WHERE id = ?",
-            [&product_id.to_string()],
+            params![product_id],
             |row| row.get(0),
         )?;
 
         if current_stock < quantity {
-            return Err(rusqlite::Error::InvalidParameterName("库存不足".to_string()));
+            return Err(AppError::new("STOCK_INSUFFICIENT", "库存不足"));
         }
 
-        // 添加出库记录
         tx.execute(
             "INSERT INTO outbound_orders (product_id, quantity, price, total, customer) VALUES (?, ?, ?, ?, ?)",
-            [&product_id.to_string(), &quantity.to_string(), &price.to_string(), &total.to_string(), customer],
+            params![product_id, quantity, price, total, customer],
         )?;
+        let row_id = tx.last_insert_rowid();
 
-        // 更新库存
         tx.execute(
             "UPDATE products SET stock = stock - ?, updated_at = datetime('now', 'localtime') WHERE id = ?",
-            [&quantity.to_string(), &product_id.to_string()],
+            params![quantity, product_id],
         )?;
 
         tx.commit()?;
-        Ok(self.conn.last_insert_rowid())
+        Ok(row_id)
     }
 
-    // 统计数据
-    pub fn get_statistics(&self) -> SqliteResult<serde_json::Value> {
-        // 商品总数
-        let product_count: i64 = self.conn.query_row(
-            "SELECT COUNT(*) FROM products",
-            [],
-            |row| row.get(0),
-        )?;
+    pub fn get_statistics(&self) -> Result<serde_json::Value, AppError> {
+        let product_count: i64 =
+            self.conn
+                .query_row("SELECT COUNT(*) FROM products", [], |row| row.get(0))?;
 
         // 库存总数
-        let total_stock: i64 = self.conn.query_row(
-            "SELECT COALESCE(SUM(stock), 0) FROM products",
-            [],
-            |row| row.get(0),
-        )?;
+        let total_stock: i64 =
+            self.conn
+                .query_row("SELECT COALESCE(SUM(stock), 0) FROM products", [], |row| {
+                    row.get(0)
+                })?;
 
         // 库存总价值（按成本价）
         let total_value: f64 = self.conn.query_row(
@@ -262,7 +283,11 @@ impl Database {
     }
 
     // 获取入库记录
-    pub fn get_inbound_records(&self, start_date: Option<&str>, end_date: Option<&str>) -> SqliteResult<Vec<serde_json::Value>> {
+    pub fn get_inbound_records(
+        &self,
+        start_date: Option<&str>,
+        end_date: Option<&str>,
+    ) -> Result<Vec<serde_json::Value>, AppError> {
         let mut records = Vec::new();
 
         if let (Some(start), Some(end)) = (start_date, end_date) {
@@ -317,14 +342,14 @@ impl Database {
     }
 
     // 智能补全 - 根据商品名称模糊匹配返回推荐
-    pub fn get_product_suggestions(&self, name: &str) -> SqliteResult<Vec<serde_json::Value>> {
+    pub fn get_product_suggestions(&self, name: &str) -> Result<Vec<serde_json::Value>, AppError> {
         let pattern = format!("%{}%", name);
         let mut stmt = self.conn.prepare(
             "SELECT DISTINCT category, unit, cost_price, sell_price 
              FROM products 
              WHERE name LIKE ? AND category IS NOT NULL AND category != ''
              ORDER BY updated_at DESC 
-             LIMIT 3"
+             LIMIT 3",
         )?;
         let rows = stmt.query_map([&pattern], |row| {
             Ok(serde_json::json!({
@@ -342,8 +367,7 @@ impl Database {
     }
 
     // 获取销售趋势 - 近7天 vs 上月同期7天
-    pub fn get_sales_trend(&self) -> SqliteResult<serde_json::Value> {
-        // 最近7天销售额
+    pub fn get_sales_trend(&self) -> Result<serde_json::Value, AppError> {
         let mut daily = Vec::new();
         for i in (0..7).rev() {
             let date: String = self.conn.query_row(
@@ -382,7 +406,7 @@ impl Database {
     }
 
     // 获取滞销商品 - 指定天数内没有出库记录
-    pub fn get_slow_moving_products(&self, days: i32) -> SqliteResult<Vec<serde_json::Value>> {
+    pub fn get_slow_moving_products(&self, days: i32) -> Result<Vec<serde_json::Value>, AppError> {
         let mut stmt = self.conn.prepare(
             "SELECT p.id, p.name, p.category, p.stock, p.unit,
                     COALESCE(MAX(o.created_at), '无记录') as last_outbound
@@ -391,7 +415,7 @@ impl Database {
              GROUP BY p.id
              HAVING last_outbound = '无记录'
                 OR julianday('now', 'localtime') - julianday(last_outbound) > ?
-             ORDER BY last_outbound ASC"
+             ORDER BY last_outbound ASC",
         )?;
 
         let rows = stmt.query_map([days], |row| {
@@ -413,8 +437,7 @@ impl Database {
     }
 
     // 获取经营周报数据
-    pub fn get_weekly_report(&self) -> SqliteResult<serde_json::Value> {
-        // 本周数据
+    pub fn get_weekly_report(&self) -> Result<serde_json::Value, AppError> {
         let current_sales: f64 = self.conn.query_row(
             "SELECT COALESCE(SUM(total), 0) FROM outbound_orders WHERE created_at >= date('now', 'localtime', 'weekday 0', '-6 days')",
             [],
@@ -497,12 +520,12 @@ impl Database {
     }
 
     // 获取低库存预警商品
-    pub fn get_low_stock_products(&self) -> SqliteResult<Vec<serde_json::Value>> {
+    pub fn get_low_stock_products(&self) -> Result<Vec<serde_json::Value>, AppError> {
         let mut stmt = self.conn.prepare(
             "SELECT id, name, category, unit, cost_price, sell_price, stock 
              FROM products 
              WHERE stock < 10 
-             ORDER BY stock ASC"
+             ORDER BY stock ASC",
         )?;
 
         let rows = stmt.query_map([], |row| {
@@ -525,7 +548,11 @@ impl Database {
     }
 
     // 获取出库记录
-    pub fn get_outbound_records(&self, start_date: Option<&str>, end_date: Option<&str>) -> SqliteResult<Vec<serde_json::Value>> {
+    pub fn get_outbound_records(
+        &self,
+        start_date: Option<&str>,
+        end_date: Option<&str>,
+    ) -> Result<Vec<serde_json::Value>, AppError> {
         let mut records = Vec::new();
 
         if let (Some(start), Some(end)) = (start_date, end_date) {
