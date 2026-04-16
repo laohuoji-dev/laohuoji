@@ -316,6 +316,33 @@ async fn get_low_stock_products(
     db.get_low_stock_products()
 }
 
+#[tauri::command]
+async fn get_low_stock_threshold(state: State<'_, AppState>) -> Result<i32, AppError> {
+    let db_guard = state
+        .db
+        .lock()
+        .map_err(|e| AppError::new("LOCK_ERROR", e.to_string()))?;
+    let db = db_guard
+        .as_ref()
+        .ok_or_else(|| AppError::new("DB_NOT_INIT", "数据库未初始化"))?;
+    db.get_low_stock_threshold()
+}
+
+#[tauri::command]
+async fn set_low_stock_threshold(
+    threshold: i32,
+    state: State<'_, AppState>,
+) -> Result<(), AppError> {
+    let mut db_guard = state
+        .db
+        .lock()
+        .map_err(|e| AppError::new("LOCK_ERROR", e.to_string()))?;
+    let db = db_guard
+        .as_mut()
+        .ok_or_else(|| AppError::new("DB_NOT_INIT", "数据库未初始化"))?;
+    db.set_low_stock_threshold(threshold)
+}
+
 // 记录查询命令
 #[tauri::command]
 async fn get_inbound_records(
@@ -376,6 +403,8 @@ pub fn run() {
             get_slow_moving_products,
             get_weekly_report,
             get_low_stock_products,
+            get_low_stock_threshold,
+            set_low_stock_threshold,
             get_inbound_records,
             get_outbound_records,
         ])

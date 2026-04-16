@@ -35,10 +35,17 @@ impl Database {
             0 => {
                 self.init_tables()?;
                 self.ensure_indexes()?;
-                self.conn.execute_batch("PRAGMA user_version = 1;")?;
+                self.migrate_to_v2()?;
+                self.conn.execute_batch("PRAGMA user_version = 2;")?;
                 Ok(())
             }
-            1 => self.ensure_indexes(),
+            1 => {
+                self.ensure_indexes()?;
+                self.migrate_to_v2()?;
+                self.conn.execute_batch("PRAGMA user_version = 2;")?;
+                Ok(())
+            }
+            2 => self.ensure_indexes(),
             other => Err(AppError::new(
                 "DB_VERSION_UNSUPPORTED",
                 format!("数据库版本不支持: {}", other),
@@ -108,6 +115,48 @@ impl Database {
             CREATE INDEX IF NOT EXISTS idx_inbound_product_created_at ON inbound_orders(product_id, created_at);
             CREATE INDEX IF NOT EXISTS idx_outbound_product_created_at ON outbound_orders(product_id, created_at);
             ",
+        )?;
+        Ok(())
+    }
+
+    fn migrate_to_v2(&self) -> Result<(), AppError> {
+        self.conn.execute_batch(
+            "
+            CREATE TABLE IF NOT EXISTS app_settings (
+                key TEXT PRIMARY KEY,
+                value TEXT NOT NULL
+            );
+            ",
+        )?;
+        self.conn.execute(
+            "INSERT OR IGNORE INTO app_settings (key, value) VALUES ('low_stock_threshold', '10')",
+            [],
+        )?;
+        Ok(())
+    }
+
+    pub fn get_low_stock_threshold(&self) -> Result<i32, AppError> {
+        let result: Result<String, rusqlite::Error> = self.conn.query_row(
+            "SELECT value FROM app_settings WHERE key = 'low_stock_threshold'",
+            [],
+            |row| row.get(0),
+        );
+        match result {
+            Ok(value) => value
+                .parse::<i32>()
+                .map_err(|e| AppError::new("SETTING_INVALID", e.to_string())),
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(10),
+            Err(e) => Err(e.into()),
+        }
+    }
+
+    pub fn set_low_stock_threshold(&mut self, threshold: i32) -> Result<(), AppError> {
+        if threshold <= 0 {
+            return Err(AppError::new("SETTING_INVALID", "阈值必须大于 0"));
+        }
+        self.conn.execute(
+            "INSERT INTO app_settings (key, value) VALUES ('low_stock_threshold', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            params![threshold.to_string()],
         )?;
         Ok(())
     }
@@ -552,14 +601,15 @@ impl Database {
 
     // 获取低库存预警商品
     pub fn get_low_stock_products(&self) -> Result<Vec<serde_json::Value>, AppError> {
+        let threshold = self.get_low_stock_threshold()?;
         let mut stmt = self.conn.prepare(
             "SELECT id, name, category, unit, cost_price, sell_price, stock 
              FROM products 
-             WHERE stock < 10 
+             WHERE stock < ? 
              ORDER BY stock ASC",
         )?;
 
-        let rows = stmt.query_map([], |row| {
+        let rows = stmt.query_map(params![threshold], |row| {
             Ok(serde_json::json!({
                 "id": row.get::<_, i64>(0)?,
                 "name": row.get::<_, String>(1)?,

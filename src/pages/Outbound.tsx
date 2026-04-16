@@ -5,6 +5,7 @@ import { invoke } from '@tauri-apps/api/core';
 import type { Dayjs } from 'dayjs';
 import * as XLSX from 'xlsx';
 import { getTauriAppError, getTauriErrorMessage } from '../utils/tauriError';
+import { getLowStockThreshold } from '../utils/settings';
 
 interface Product {
   id: number;
@@ -32,11 +33,22 @@ const Outbound = () => {
   const [submitting, setSubmitting] = useState(false);
   const [form] = Form.useForm();
   const [dateRange, setDateRange] = useState<[Dayjs | null, Dayjs | null] | null>(null);
+  const [lowStockThreshold, setLowStockThreshold] = useState<number>(10);
 
   useEffect(() => {
     loadProducts();
     loadRecords();
+    loadLowStockThreshold();
   }, []);
+
+  const loadLowStockThreshold = async () => {
+    try {
+      const value = await getLowStockThreshold();
+      setLowStockThreshold(value);
+    } catch (error) {
+      console.error(error);
+    }
+  };
 
   const loadProducts = async () => {
     setLoading(true);
@@ -113,6 +125,7 @@ const Outbound = () => {
   }, [selectedProductId, selectedProduct, form]);
 
   const isStockInsufficient = selectedProduct && quantity && quantity > selectedProduct.stock;
+  const isLowStock = selectedProduct ? selectedProduct.stock < lowStockThreshold : false;
 
   const recordColumns = [
     { title: 'ID', dataIndex: 'id', width: 60 },
@@ -161,7 +174,7 @@ const Outbound = () => {
           {selectedProduct && (
             <Alert
               message={`当前库存: ${selectedProduct.stock} ${selectedProduct.unit}`}
-              type={selectedProduct.stock < 10 ? 'warning' : 'info'}
+              type={isLowStock ? 'warning' : 'info'}
               showIcon
               style={{ marginBottom: 16 }}
             />

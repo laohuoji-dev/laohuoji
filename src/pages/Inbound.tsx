@@ -5,6 +5,7 @@ import { invoke } from '@tauri-apps/api/core';
 import type { Dayjs } from 'dayjs';
 import * as XLSX from 'xlsx';
 import { getTauriErrorMessage } from '../utils/tauriError';
+import { getLowStockThreshold } from '../utils/settings';
 
 interface Product {
   id: number;
@@ -31,11 +32,22 @@ const Inbound = () => {
   const [submitting, setSubmitting] = useState(false);
   const [form] = Form.useForm();
   const [dateRange, setDateRange] = useState<[Dayjs | null, Dayjs | null] | null>(null);
+  const [lowStockThreshold, setLowStockThreshold] = useState<number>(10);
 
   useEffect(() => {
     loadProducts();
     loadRecords();
+    loadLowStockThreshold();
   }, []);
+
+  const loadLowStockThreshold = async () => {
+    try {
+      const value = await getLowStockThreshold();
+      setLowStockThreshold(value);
+    } catch (error) {
+      console.error(error);
+    }
+  };
 
   const loadProducts = async () => {
     setLoading(true);
@@ -98,6 +110,7 @@ const Inbound = () => {
   const selectedProduct = products.find((p) => p.id === selectedProductId);
   const quantity = Form.useWatch('quantity', form);
   const price = Form.useWatch('price', form);
+  const isLowStock = selectedProduct ? selectedProduct.stock < lowStockThreshold : false;
 
   const recordColumns = [
     { title: 'ID', dataIndex: 'id', width: 60 },
@@ -142,6 +155,13 @@ const Inbound = () => {
               ))}
             </Select>
           </Form.Item>
+
+          {selectedProduct && (
+            <Tag color={isLowStock ? 'red' : 'blue'} style={{ marginBottom: 16 }}>
+              当前库存: {selectedProduct.stock} {selectedProduct.unit}
+              {isLowStock ? `（低于阈值 ${lowStockThreshold}）` : ''}
+            </Tag>
+          )}
 
           <Form.Item
             name="quantity"

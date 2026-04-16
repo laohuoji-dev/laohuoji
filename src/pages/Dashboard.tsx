@@ -1,9 +1,10 @@
 import { useEffect, useState } from 'react';
-import { Card, Row, Col, Statistic, Button, List, Tag, message } from 'antd';
+import { Card, Row, Col, Statistic, Button, List, Tag, message, Space, InputNumber } from 'antd';
 import { AppstoreOutlined, DollarOutlined, ShoppingCartOutlined, RiseOutlined, ReloadOutlined, WarningOutlined, ClockCircleOutlined } from '@ant-design/icons';
 import { invoke } from '@tauri-apps/api/core';
 import SalesTrend from '../components/SalesTrend';
 import { getTauriErrorMessage } from '../utils/tauriError';
+import { getLowStockThreshold, setLowStockThreshold } from '../utils/settings';
 
 interface Statistics {
   product_count: number;
@@ -41,12 +42,24 @@ const Dashboard = () => {
   const [lowStockProducts, setLowStockProducts] = useState<LowStockProduct[]>([]);
   const [slowMovingProducts, setSlowMovingProducts] = useState<SlowMovingProduct[]>([]);
   const [loading, setLoading] = useState(true);
+  const [lowStockThreshold, setLowStockThresholdState] = useState<number>(10);
+  const [savingThreshold, setSavingThreshold] = useState(false);
 
   useEffect(() => {
     loadStatistics();
     loadLowStockProducts();
     loadSlowMovingProducts();
+    loadLowStockThreshold();
   }, []);
+
+  const loadLowStockThreshold = async () => {
+    try {
+      const value = await getLowStockThreshold();
+      setLowStockThresholdState(value);
+    } catch (error) {
+      message.error(getTauriErrorMessage(error) || '加载低库存阈值失败');
+    }
+  };
 
   const loadStatistics = async () => {
     setLoading(true);
@@ -85,9 +98,44 @@ const Dashboard = () => {
     <div>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
         <h2>数据概览</h2>
-        <Button icon={<ReloadOutlined />} onClick={() => { loadStatistics(); loadLowStockProducts(); loadSlowMovingProducts(); }} loading={loading}>
-          刷新
-        </Button>
+        <Space>
+          <span style={{ color: '#666' }}>低库存阈值</span>
+          <InputNumber
+            min={1}
+            value={lowStockThreshold}
+            onChange={(v) => setLowStockThresholdState(Number(v || 1))}
+          />
+          <Button
+            type="primary"
+            loading={savingThreshold}
+            onClick={async () => {
+              setSavingThreshold(true);
+              try {
+                await setLowStockThreshold(lowStockThreshold);
+                message.success('阈值已保存');
+                loadLowStockProducts();
+              } catch (error) {
+                message.error(getTauriErrorMessage(error) || '保存阈值失败');
+              } finally {
+                setSavingThreshold(false);
+              }
+            }}
+          >
+            保存
+          </Button>
+          <Button
+            icon={<ReloadOutlined />}
+            onClick={() => {
+              loadStatistics();
+              loadLowStockThreshold();
+              loadLowStockProducts();
+              loadSlowMovingProducts();
+            }}
+            loading={loading}
+          >
+            刷新
+          </Button>
+        </Space>
       </div>
       <Row gutter={[16, 16]}>
         <Col xs={24} sm={12} md={8}>

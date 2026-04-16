@@ -4,6 +4,7 @@ import { PlusOutlined, EditOutlined, DeleteOutlined, SearchOutlined } from '@ant
 import { invoke } from '@tauri-apps/api/core';
 import { getFirstLetter, toPinyin } from '../utils/pinyin';
 import { getTauriErrorMessage } from '../utils/tauriError';
+import { getLowStockThreshold } from '../utils/settings';
 
 interface Product {
   id: number;
@@ -33,12 +34,23 @@ const Products = () => {
   const [searchText, setSearchText] = useState('');
   const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
   const [showSuggestions, setShowSuggestions] = useState(false);
+  const [lowStockThreshold, setLowStockThreshold] = useState<number>(10);
   const [form] = Form.useForm();
   const suggestTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     loadProducts();
+    loadLowStockThreshold();
   }, []);
+
+  const loadLowStockThreshold = async () => {
+    try {
+      const value = await getLowStockThreshold();
+      setLowStockThreshold(value);
+    } catch (error) {
+      console.error(error);
+    }
+  };
 
   useEffect(() => {
     if (!searchText) {
@@ -173,7 +185,7 @@ const Products = () => {
       dataIndex: 'stock',
       width: 80,
       render: (val: number) => (
-        <span style={{ color: val < 10 ? '#cf1322' : '#3f8600' }}>
+        <span style={{ color: val < lowStockThreshold ? '#cf1322' : '#3f8600' }}>
           {val}
         </span>
       ),
