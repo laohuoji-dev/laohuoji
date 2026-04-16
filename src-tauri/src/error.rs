@@ -25,7 +25,15 @@ impl std::error::Error for AppError {}
 
 impl From<rusqlite::Error> for AppError {
     fn from(value: rusqlite::Error) -> Self {
-        Self::new("DB_ERROR", value.to_string())
+        match value {
+            rusqlite::Error::SqliteFailure(_, Some(message))
+                if message.contains("库存不能为负") =>
+            {
+                Self::new("STOCK_NEGATIVE", message)
+            }
+            rusqlite::Error::SqliteFailure(_, Some(message)) => Self::new("DB_ERROR", message),
+            other => Self::new("DB_ERROR", other.to_string()),
+        }
     }
 }
 

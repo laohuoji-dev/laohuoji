@@ -36,16 +36,24 @@ impl Database {
                 self.init_tables()?;
                 self.ensure_indexes()?;
                 self.migrate_to_v2()?;
-                self.conn.execute_batch("PRAGMA user_version = 2;")?;
+                self.migrate_to_v3()?;
+                self.conn.execute_batch("PRAGMA user_version = 3;")?;
                 Ok(())
             }
             1 => {
                 self.ensure_indexes()?;
                 self.migrate_to_v2()?;
-                self.conn.execute_batch("PRAGMA user_version = 2;")?;
+                self.migrate_to_v3()?;
+                self.conn.execute_batch("PRAGMA user_version = 3;")?;
                 Ok(())
             }
-            2 => self.ensure_indexes(),
+            2 => {
+                self.ensure_indexes()?;
+                self.migrate_to_v3()?;
+                self.conn.execute_batch("PRAGMA user_version = 3;")?;
+                Ok(())
+            }
+            3 => self.ensure_indexes(),
             other => Err(AppError::new(
                 "DB_VERSION_UNSUPPORTED",
                 format!("数据库版本不支持: {}", other),
@@ -135,6 +143,45 @@ impl Database {
         Ok(())
     }
 
+    fn migrate_to_v3(&self) -> Result<(), AppError> {
+        self.conn.execute_batch(
+            "
+            CREATE TRIGGER IF NOT EXISTS trg_products_stock_nonnegative_insert
+            BEFORE INSERT ON products
+            FOR EACH ROW
+            WHEN NEW.stock < 0
+            BEGIN
+              SELECT RAISE(ABORT, '库存不能为负');
+            END;
+
+            CREATE TRIGGER IF NOT EXISTS trg_products_stock_nonnegative_update
+            BEFORE UPDATE OF stock ON products
+            FOR EACH ROW
+            WHEN NEW.stock < 0
+            BEGIN
+              SELECT RAISE(ABORT, '库存不能为负');
+            END;
+
+            CREATE TRIGGER IF NOT EXISTS trg_inbound_orders_quantity_positive
+            BEFORE INSERT ON inbound_orders
+            FOR EACH ROW
+            WHEN NEW.quantity <= 0
+            BEGIN
+              SELECT RAISE(ABORT, '数量必须大于 0');
+            END;
+
+            CREATE TRIGGER IF NOT EXISTS trg_outbound_orders_quantity_positive
+            BEFORE INSERT ON outbound_orders
+            FOR EACH ROW
+            WHEN NEW.quantity <= 0
+            BEGIN
+              SELECT RAISE(ABORT, '数量必须大于 0');
+            END;
+            ",
+        )?;
+        Ok(())
+    }
+
     pub fn get_low_stock_threshold(&self) -> Result<i32, AppError> {
         let result: Result<String, rusqlite::Error> = self.conn.query_row(
             "SELECT value FROM app_settings WHERE key = 'low_stock_threshold'",
@@ -199,6 +246,18 @@ impl Database {
         sell_price: f64,
         stock: i32,
     ) -> Result<i64, AppError> {
+        if name.trim().is_empty() {
+            return Err(AppError::new("VALIDATION_ERROR", "商品名称不能为空"));
+        }
+        if unit.trim().is_empty() {
+            return Err(AppError::new("VALIDATION_ERROR", "单位不能为空"));
+        }
+        if cost_price < 0.0 || sell_price < 0.0 {
+            return Err(AppError::new("VALIDATION_ERROR", "价格不能为负"));
+        }
+        if stock < 0 {
+            return Err(AppError::new("STOCK_NEGATIVE", "库存不能为负"));
+        }
         self.conn.execute(
             "INSERT INTO products (name, category, unit, cost_price, sell_price, stock) VALUES (?, ?, ?, ?, ?, ?)",
             params![name, category, unit, cost_price, sell_price, stock],
@@ -216,6 +275,18 @@ impl Database {
         sell_price: f64,
         stock: i32,
     ) -> Result<(), AppError> {
+        if name.trim().is_empty() {
+            return Err(AppError::new("VALIDATION_ERROR", "商品名称不能为空"));
+        }
+        if unit.trim().is_empty() {
+            return Err(AppError::new("VALIDATION_ERROR", "单位不能为空"));
+        }
+        if cost_price < 0.0 || sell_price < 0.0 {
+            return Err(AppError::new("VALIDATION_ERROR", "价格不能为负"));
+        }
+        if stock < 0 {
+            return Err(AppError::new("STOCK_NEGATIVE", "库存不能为负"));
+        }
         self.conn.execute(
             "UPDATE products SET name = ?, category = ?, unit = ?, cost_price = ?, sell_price = ?, stock = ?, updated_at = datetime('now', 'localtime') WHERE id = ?",
             params![name, category, unit, cost_price, sell_price, stock, id],
@@ -262,6 +333,12 @@ impl Database {
         price: f64,
         supplier: &str,
     ) -> Result<i64, AppError> {
+        if quantity <= 0 {
+            return Err(AppError::new("VALIDATION_ERROR", "数量必须大于 0"));
+        }
+        if price < 0.0 {
+            return Err(AppError::new("VALIDATION_ERROR", "单价不能为负"));
+        }
         let total = quantity as f64 * price;
 
         let tx = self.conn.transaction()?;
@@ -288,6 +365,12 @@ impl Database {
         price: f64,
         customer: &str,
     ) -> Result<i64, AppError> {
+        if quantity <= 0 {
+            return Err(AppError::new("VALIDATION_ERROR", "数量必须大于 0"));
+        }
+        if price < 0.0 {
+            return Err(AppError::new("VALIDATION_ERROR", "单价不能为负"));
+        }
         let total = quantity as f64 * price;
 
         let tx = self.conn.transaction()?;
