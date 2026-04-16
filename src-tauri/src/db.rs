@@ -42,7 +42,8 @@ impl Database {
                 self.migrate_to_v3()?;
                 self.migrate_to_v4()?;
                 self.migrate_to_v5()?;
-                self.conn.execute_batch("PRAGMA user_version = 5;")?;
+                self.migrate_to_v6()?;
+                self.conn.execute_batch("PRAGMA user_version = 6;")?;
                 Ok(())
             }
             1 => {
@@ -51,7 +52,8 @@ impl Database {
                 self.migrate_to_v3()?;
                 self.migrate_to_v4()?;
                 self.migrate_to_v5()?;
-                self.conn.execute_batch("PRAGMA user_version = 5;")?;
+                self.migrate_to_v6()?;
+                self.conn.execute_batch("PRAGMA user_version = 6;")?;
                 Ok(())
             }
             2 => {
@@ -59,23 +61,32 @@ impl Database {
                 self.migrate_to_v3()?;
                 self.migrate_to_v4()?;
                 self.migrate_to_v5()?;
-                self.conn.execute_batch("PRAGMA user_version = 5;")?;
+                self.migrate_to_v6()?;
+                self.conn.execute_batch("PRAGMA user_version = 6;")?;
                 Ok(())
             }
             3 => {
                 self.ensure_indexes()?;
                 self.migrate_to_v4()?;
                 self.migrate_to_v5()?;
-                self.conn.execute_batch("PRAGMA user_version = 5;")?;
+                self.migrate_to_v6()?;
+                self.conn.execute_batch("PRAGMA user_version = 6;")?;
                 Ok(())
             }
             4 => {
                 self.ensure_indexes()?;
                 self.migrate_to_v5()?;
-                self.conn.execute_batch("PRAGMA user_version = 5;")?;
+                self.migrate_to_v6()?;
+                self.conn.execute_batch("PRAGMA user_version = 6;")?;
                 Ok(())
             }
-            5 => self.ensure_indexes(),
+            5 => {
+                self.ensure_indexes()?;
+                self.migrate_to_v6()?;
+                self.conn.execute_batch("PRAGMA user_version = 6;")?;
+                Ok(())
+            }
+            6 => self.ensure_indexes(),
             other => Err(AppError::new(
                 "DB_VERSION_UNSUPPORTED",
                 format!("数据库版本不支持: {}", other),
@@ -234,6 +245,41 @@ impl Database {
             CREATE INDEX IF NOT EXISTS idx_products_barcode ON products(barcode);
             ",
         )?;
+        Ok(())
+    }
+
+    fn migrate_to_v6(&self) -> Result<(), AppError> {
+        self.conn.execute_batch(
+            "
+            CREATE TABLE IF NOT EXISTS categories (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL UNIQUE,
+                created_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
+            );
+            CREATE TABLE IF NOT EXISTS units (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL UNIQUE,
+                created_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
+            );
+            ",
+        )?;
+
+        // 自动从现有商品数据中提取分类和单位进行初始化
+        self.conn.execute_batch(
+            "
+            INSERT OR IGNORE INTO categories (name) SELECT DISTINCT category FROM products WHERE category IS NOT NULL AND category != '';
+            INSERT OR IGNORE INTO units (name) SELECT DISTINCT unit FROM products WHERE unit IS NOT NULL AND unit != '';
+            "
+        )?;
+
+        // 如果提取后仍然为空，则插入一些默认值
+        self.conn.execute_batch(
+            "
+            INSERT OR IGNORE INTO categories (name) VALUES ('默认分类');
+            INSERT OR IGNORE INTO units (name) VALUES ('个'), ('件'), ('箱');
+            ",
+        )?;
+
         Ok(())
     }
 
@@ -410,6 +456,90 @@ impl Database {
 
         self.conn
             .execute("DELETE FROM products WHERE id = ?", params![id])?;
+        Ok(())
+    }
+
+    pub fn get_categories(&self) -> Result<Vec<serde_json::Value>, AppError> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT id, name, created_at FROM categories ORDER BY name ASC")?;
+        let rows = stmt.query_map([], |row| {
+            Ok(serde_json::json!({
+                "id": row.get::<_, i64>(0)?,
+                "name": row.get::<_, String>(1)?,
+                "created_at": row.get::<_, String>(2)?,
+            }))
+        })?;
+        let mut result = Vec::new();
+        for row in rows {
+            result.push(row?);
+        }
+        Ok(result)
+    }
+
+    pub fn add_category(&mut self, name: &str) -> Result<i64, AppError> {
+        if name.trim().is_empty() {
+            return Err(AppError::new("VALIDATION_ERROR", "分类名称不能为空"));
+        }
+        match self
+            .conn
+            .execute("INSERT INTO categories (name) VALUES (?)", params![name])
+        {
+            Ok(_) => Ok(self.conn.last_insert_rowid()),
+            Err(rusqlite::Error::SqliteFailure(e, _))
+                if e.code == rusqlite::ffi::ErrorCode::ConstraintViolation =>
+            {
+                Err(AppError::new("VALIDATION_ERROR", "分类名称已存在"))
+            }
+            Err(e) => Err(e.into()),
+        }
+    }
+
+    pub fn delete_category(&mut self, id: i64) -> Result<(), AppError> {
+        self.conn
+            .execute("DELETE FROM categories WHERE id = ?", params![id])?;
+        Ok(())
+    }
+
+    pub fn get_units(&self) -> Result<Vec<serde_json::Value>, AppError> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT id, name, created_at FROM units ORDER BY name ASC")?;
+        let rows = stmt.query_map([], |row| {
+            Ok(serde_json::json!({
+                "id": row.get::<_, i64>(0)?,
+                "name": row.get::<_, String>(1)?,
+                "created_at": row.get::<_, String>(2)?,
+            }))
+        })?;
+        let mut result = Vec::new();
+        for row in rows {
+            result.push(row?);
+        }
+        Ok(result)
+    }
+
+    pub fn add_unit(&mut self, name: &str) -> Result<i64, AppError> {
+        if name.trim().is_empty() {
+            return Err(AppError::new("VALIDATION_ERROR", "单位名称不能为空"));
+        }
+        match self
+            .conn
+            .execute("INSERT INTO units (name) VALUES (?)", params![name])
+        {
+            Ok(_) => Ok(self.conn.last_insert_rowid()),
+            Err(rusqlite::Error::SqliteFailure(e, _))
+                if e.code == rusqlite::ffi::ErrorCode::ConstraintViolation =>
+            {
+                Err(AppError::new("VALIDATION_ERROR", "单位名称已存在"))
+            }
+            Err(e) => Err(e.into()),
+        }
+    }
+
+    pub fn delete_unit(&mut self, id: i64) -> Result<(), AppError> {
+        self.conn
+            .execute("DELETE FROM units WHERE id = ?", params![id])?;
         Ok(())
     }
 

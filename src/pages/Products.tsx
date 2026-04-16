@@ -7,7 +7,7 @@ import { writeFile } from '@tauri-apps/plugin-fs';
 import * as XLSX from 'xlsx';
 import { getFirstLetter, toPinyin } from '../utils/pinyin';
 import { getTauriAppError, getTauriErrorMessage } from '../utils/tauriError';
-import { getLowStockThreshold } from '../utils/settings';
+import { getLowStockThreshold, getCategories, getUnits, Category, Unit } from '../utils/settings';
 
 interface Product {
   id: number;
@@ -40,19 +40,27 @@ const Products = () => {
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
   const [searchText, setSearchText] = useState('');
   const [lowStockThreshold, setLowStockThreshold] = useState<number>(10);
+  const [categories, setCategories] = useState<Category[]>([]);
+  const [units, setUnits] = useState<Unit[]>([]);
   const [form] = Form.useForm();
 
   useEffect(() => {
     loadProducts();
-    loadLowStockThreshold();
+    loadSettings();
   }, []);
 
-  const loadLowStockThreshold = async () => {
+  const loadSettings = async () => {
     try {
-      const value = await getLowStockThreshold();
-      setLowStockThreshold(value);
+      const [threshold, cats, uns] = await Promise.all([
+        getLowStockThreshold(),
+        getCategories(),
+        getUnits()
+      ]);
+      setLowStockThreshold(threshold);
+      setCategories(cats);
+      setUnits(uns);
     } catch (error) {
-      console.error(error);
+      console.error('加载基础配置失败:', error);
     }
   };
 
@@ -320,15 +328,23 @@ const Products = () => {
             name="category"
             label="分类"
           >
-            <Input placeholder="请输入分类（可选）" />
+            <Select placeholder="请选择分类" allowClear>
+              {categories.map(c => (
+                <Select.Option key={c.id} value={c.name}>{c.name}</Select.Option>
+              ))}
+            </Select>
           </Form.Item>
 
           <Form.Item
             name="unit"
             label="单位"
-            rules={[{ required: true, message: '请输入单位' }]}
+            rules={[{ required: true, message: '请选择单位' }]}
           >
-            <Input placeholder="如：件、箱、个" />
+            <Select placeholder="请选择单位">
+              {units.map(u => (
+                <Select.Option key={u.id} value={u.name}>{u.name}</Select.Option>
+              ))}
+            </Select>
           </Form.Item>
 
           <Form.Item

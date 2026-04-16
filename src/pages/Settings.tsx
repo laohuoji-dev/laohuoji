@@ -1,9 +1,13 @@
 import { useEffect, useState } from 'react';
-import { Card, Form, InputNumber, Button, message, Space, Typography, Alert, Modal } from 'antd';
-import { SaveOutlined, DownloadOutlined, UploadOutlined, DatabaseOutlined, SettingOutlined } from '@ant-design/icons';
+import { Card, Form, InputNumber, Button, message, Space, Typography, Alert, Modal, Input, List, Popconfirm, Tabs } from 'antd';
+import { SaveOutlined, DownloadOutlined, UploadOutlined, DatabaseOutlined, SettingOutlined, DeleteOutlined, PlusOutlined, TagsOutlined, ExperimentOutlined } from '@ant-design/icons';
 import { invoke } from '@tauri-apps/api/core';
 import { save, open } from '@tauri-apps/plugin-dialog';
-import { getLowStockThreshold, setLowStockThreshold as saveLowStockThreshold } from '../utils/settings';
+import { 
+  getLowStockThreshold, setLowStockThreshold as saveLowStockThreshold,
+  getCategories, addCategory, deleteCategory, Category,
+  getUnits, addUnit, deleteUnit, Unit
+} from '../utils/settings';
 import { getTauriErrorMessage } from '../utils/tauriError';
 
 const { Title, Text } = Typography;
@@ -12,10 +16,69 @@ const Settings = () => {
   const [form] = Form.useForm();
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [categories, setCategories] = useState<Category[]>([]);
+  const [units, setUnits] = useState<Unit[]>([]);
+  const [newCategoryName, setNewCategoryName] = useState('');
+  const [newUnitName, setNewUnitName] = useState('');
 
   useEffect(() => {
     loadSettings();
+    loadCategoriesAndUnits();
   }, []);
+
+  const loadCategoriesAndUnits = async () => {
+    try {
+      const [cats, uns] = await Promise.all([getCategories(), getUnits()]);
+      setCategories(cats);
+      setUnits(uns);
+    } catch (error) {
+      console.error('加载分类与单位失败:', error);
+    }
+  };
+
+  const handleAddCategory = async () => {
+    if (!newCategoryName.trim()) return;
+    try {
+      await addCategory(newCategoryName.trim());
+      setNewCategoryName('');
+      message.success('分类添加成功');
+      loadCategoriesAndUnits();
+    } catch (error) {
+      message.error(getTauriErrorMessage(error) || '添加分类失败');
+    }
+  };
+
+  const handleDeleteCategory = async (id: number) => {
+    try {
+      await deleteCategory(id);
+      message.success('分类删除成功');
+      loadCategoriesAndUnits();
+    } catch (error) {
+      message.error(getTauriErrorMessage(error) || '删除分类失败');
+    }
+  };
+
+  const handleAddUnit = async () => {
+    if (!newUnitName.trim()) return;
+    try {
+      await addUnit(newUnitName.trim());
+      setNewUnitName('');
+      message.success('单位添加成功');
+      loadCategoriesAndUnits();
+    } catch (error) {
+      message.error(getTauriErrorMessage(error) || '添加单位失败');
+    }
+  };
+
+  const handleDeleteUnit = async (id: number) => {
+    try {
+      await deleteUnit(id);
+      message.success('单位删除成功');
+      loadCategoriesAndUnits();
+    } catch (error) {
+      message.error(getTauriErrorMessage(error) || '删除单位失败');
+    }
+  };
 
   const loadSettings = async () => {
     setLoading(true);
@@ -134,6 +197,83 @@ const Settings = () => {
             </Button>
           </Form.Item>
         </Form>
+      </Card>
+
+      <Card title={<Space><TagsOutlined /> 分类与单位管理</Space>} style={{ marginBottom: 24 }}>
+        <Tabs
+          items={[
+            {
+              key: '1',
+              label: '分类管理',
+              icon: <TagsOutlined />,
+              children: (
+                <div style={{ maxWidth: 500 }}>
+                  <Space style={{ marginBottom: 16, width: '100%' }}>
+                    <Input 
+                      placeholder="新分类名称" 
+                      value={newCategoryName} 
+                      onChange={e => setNewCategoryName(e.target.value)}
+                      onPressEnter={handleAddCategory}
+                      style={{ width: 200 }}
+                    />
+                    <Button type="primary" icon={<PlusOutlined />} onClick={handleAddCategory}>添加分类</Button>
+                  </Space>
+                  <List
+                    bordered
+                    size="small"
+                    dataSource={categories}
+                    renderItem={item => (
+                      <List.Item
+                        actions={[
+                          <Popconfirm title="确定删除此分类？" onConfirm={() => handleDeleteCategory(item.id)}>
+                            <Button type="text" danger icon={<DeleteOutlined />} />
+                          </Popconfirm>
+                        ]}
+                      >
+                        {item.name}
+                      </List.Item>
+                    )}
+                  />
+                </div>
+              ),
+            },
+            {
+              key: '2',
+              label: '单位管理',
+              icon: <ExperimentOutlined />,
+              children: (
+                <div style={{ maxWidth: 500 }}>
+                  <Space style={{ marginBottom: 16, width: '100%' }}>
+                    <Input 
+                      placeholder="新单位名称" 
+                      value={newUnitName} 
+                      onChange={e => setNewUnitName(e.target.value)}
+                      onPressEnter={handleAddUnit}
+                      style={{ width: 200 }}
+                    />
+                    <Button type="primary" icon={<PlusOutlined />} onClick={handleAddUnit}>添加单位</Button>
+                  </Space>
+                  <List
+                    bordered
+                    size="small"
+                    dataSource={units}
+                    renderItem={item => (
+                      <List.Item
+                        actions={[
+                          <Popconfirm title="确定删除此单位？" onConfirm={() => handleDeleteUnit(item.id)}>
+                            <Button type="text" danger icon={<DeleteOutlined />} />
+                          </Popconfirm>
+                        ]}
+                      >
+                        {item.name}
+                      </List.Item>
+                    )}
+                  />
+                </div>
+              ),
+            },
+          ]}
+        />
       </Card>
 
       <Card title={<Space><DatabaseOutlined /> 数据管理</Space>}>

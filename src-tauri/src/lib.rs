@@ -122,6 +122,79 @@ async fn change_password(password: String, state: State<'_, AppState>) -> Result
     Ok(())
 }
 
+// 分类与单位管理命令
+#[tauri::command]
+async fn get_categories(state: State<'_, AppState>) -> Result<Vec<serde_json::Value>, AppError> {
+    let db_guard = state
+        .db
+        .lock()
+        .map_err(|e| AppError::new("LOCK_ERROR", e.to_string()))?;
+    let db = db_guard
+        .as_ref()
+        .ok_or_else(|| AppError::new("DB_NOT_INIT", "数据库未初始化"))?;
+    db.get_categories()
+}
+
+#[tauri::command]
+async fn add_category(name: String, state: State<'_, AppState>) -> Result<i64, AppError> {
+    let mut db_guard = state
+        .db
+        .lock()
+        .map_err(|e| AppError::new("LOCK_ERROR", e.to_string()))?;
+    let db = db_guard
+        .as_mut()
+        .ok_or_else(|| AppError::new("DB_NOT_INIT", "数据库未初始化"))?;
+    db.add_category(&name)
+}
+
+#[tauri::command]
+async fn delete_category(id: i64, state: State<'_, AppState>) -> Result<(), AppError> {
+    let mut db_guard = state
+        .db
+        .lock()
+        .map_err(|e| AppError::new("LOCK_ERROR", e.to_string()))?;
+    let db = db_guard
+        .as_mut()
+        .ok_or_else(|| AppError::new("DB_NOT_INIT", "数据库未初始化"))?;
+    db.delete_category(id)
+}
+
+#[tauri::command]
+async fn get_units(state: State<'_, AppState>) -> Result<Vec<serde_json::Value>, AppError> {
+    let db_guard = state
+        .db
+        .lock()
+        .map_err(|e| AppError::new("LOCK_ERROR", e.to_string()))?;
+    let db = db_guard
+        .as_ref()
+        .ok_or_else(|| AppError::new("DB_NOT_INIT", "数据库未初始化"))?;
+    db.get_units()
+}
+
+#[tauri::command]
+async fn add_unit(name: String, state: State<'_, AppState>) -> Result<i64, AppError> {
+    let mut db_guard = state
+        .db
+        .lock()
+        .map_err(|e| AppError::new("LOCK_ERROR", e.to_string()))?;
+    let db = db_guard
+        .as_mut()
+        .ok_or_else(|| AppError::new("DB_NOT_INIT", "数据库未初始化"))?;
+    db.add_unit(&name)
+}
+
+#[tauri::command]
+async fn delete_unit(id: i64, state: State<'_, AppState>) -> Result<(), AppError> {
+    let mut db_guard = state
+        .db
+        .lock()
+        .map_err(|e| AppError::new("LOCK_ERROR", e.to_string()))?;
+    let db = db_guard
+        .as_mut()
+        .ok_or_else(|| AppError::new("DB_NOT_INIT", "数据库未初始化"))?;
+    db.delete_unit(id)
+}
+
 // 商品管理命令
 #[tauri::command]
 async fn add_product(product: Product, state: State<'_, AppState>) -> Result<i64, AppError> {
@@ -482,6 +555,12 @@ pub fn run() {
             get_inventory_logs,
             backup_database,
             restore_database,
+            get_categories,
+            add_category,
+            delete_category,
+            get_units,
+            add_unit,
+            delete_unit,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
