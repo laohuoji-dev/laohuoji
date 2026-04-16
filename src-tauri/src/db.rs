@@ -43,7 +43,8 @@ impl Database {
                 self.migrate_to_v4()?;
                 self.migrate_to_v5()?;
                 self.migrate_to_v6()?;
-                self.conn.execute_batch("PRAGMA user_version = 6;")?;
+                self.migrate_to_v7()?;
+                self.conn.execute_batch("PRAGMA user_version = 7;")?;
                 Ok(())
             }
             1 => {
@@ -53,7 +54,8 @@ impl Database {
                 self.migrate_to_v4()?;
                 self.migrate_to_v5()?;
                 self.migrate_to_v6()?;
-                self.conn.execute_batch("PRAGMA user_version = 6;")?;
+                self.migrate_to_v7()?;
+                self.conn.execute_batch("PRAGMA user_version = 7;")?;
                 Ok(())
             }
             2 => {
@@ -62,7 +64,8 @@ impl Database {
                 self.migrate_to_v4()?;
                 self.migrate_to_v5()?;
                 self.migrate_to_v6()?;
-                self.conn.execute_batch("PRAGMA user_version = 6;")?;
+                self.migrate_to_v7()?;
+                self.conn.execute_batch("PRAGMA user_version = 7;")?;
                 Ok(())
             }
             3 => {
@@ -70,23 +73,32 @@ impl Database {
                 self.migrate_to_v4()?;
                 self.migrate_to_v5()?;
                 self.migrate_to_v6()?;
-                self.conn.execute_batch("PRAGMA user_version = 6;")?;
+                self.migrate_to_v7()?;
+                self.conn.execute_batch("PRAGMA user_version = 7;")?;
                 Ok(())
             }
             4 => {
                 self.ensure_indexes()?;
                 self.migrate_to_v5()?;
                 self.migrate_to_v6()?;
-                self.conn.execute_batch("PRAGMA user_version = 6;")?;
+                self.migrate_to_v7()?;
+                self.conn.execute_batch("PRAGMA user_version = 7;")?;
                 Ok(())
             }
             5 => {
                 self.ensure_indexes()?;
                 self.migrate_to_v6()?;
-                self.conn.execute_batch("PRAGMA user_version = 6;")?;
+                self.migrate_to_v7()?;
+                self.conn.execute_batch("PRAGMA user_version = 7;")?;
                 Ok(())
             }
-            6 => self.ensure_indexes(),
+            6 => {
+                self.ensure_indexes()?;
+                self.migrate_to_v7()?;
+                self.conn.execute_batch("PRAGMA user_version = 7;")?;
+                Ok(())
+            }
+            7 => self.ensure_indexes(),
             other => Err(AppError::new(
                 "DB_VERSION_UNSUPPORTED",
                 format!("数据库版本不支持: {}", other),
@@ -278,6 +290,37 @@ impl Database {
             INSERT OR IGNORE INTO categories (name) VALUES ('默认分类');
             INSERT OR IGNORE INTO units (name) VALUES ('个'), ('件'), ('箱');
             ",
+        )?;
+
+        Ok(())
+    }
+
+    fn migrate_to_v7(&self) -> Result<(), AppError> {
+        self.conn.execute_batch(
+            "
+            CREATE TABLE IF NOT EXISTS customers (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL UNIQUE,
+                contact TEXT,
+                phone TEXT,
+                created_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
+            );
+            CREATE TABLE IF NOT EXISTS suppliers (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL UNIQUE,
+                contact TEXT,
+                phone TEXT,
+                created_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
+            );
+            ",
+        )?;
+
+        // 自动从现有单据中提取供应商和客户
+        self.conn.execute_batch(
+            "
+            INSERT OR IGNORE INTO suppliers (name) SELECT DISTINCT supplier FROM inbound_orders WHERE supplier IS NOT NULL AND supplier != '';
+            INSERT OR IGNORE INTO customers (name) SELECT DISTINCT customer FROM outbound_orders WHERE customer IS NOT NULL AND customer != '';
+            "
         )?;
 
         Ok(())

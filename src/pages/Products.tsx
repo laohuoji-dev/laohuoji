@@ -1,9 +1,9 @@
 import { useEffect, useState } from 'react';
 import { Table, Button, Modal, Form, Input, InputNumber, Space, message, Popconfirm, Select, Tooltip, Tag } from 'antd';
-import { PlusOutlined, EditOutlined, DeleteOutlined, SearchOutlined, QuestionCircleOutlined, DownloadOutlined } from '@ant-design/icons';
+import { PlusOutlined, EditOutlined, DeleteOutlined, SearchOutlined, QuestionCircleOutlined, DownloadOutlined, UploadOutlined } from '@ant-design/icons';
 import { invoke } from '@tauri-apps/api/core';
-import { save } from '@tauri-apps/plugin-dialog';
-import { writeFile } from '@tauri-apps/plugin-fs';
+import { save, open } from '@tauri-apps/plugin-dialog';
+import { writeFile, readFile } from '@tauri-apps/plugin-fs';
 import * as XLSX from 'xlsx';
 import { getFirstLetter, toPinyin } from '../utils/pinyin';
 import { getTauriAppError, getTauriErrorMessage } from '../utils/tauriError';
@@ -201,6 +201,66 @@ const Products = () => {
     }
   };
 
+  const importFromExcel = async () => {
+    try {
+      const filePath = await open({
+        title: '选择商品数据文件',
+        filters: [{ name: 'Excel', extensions: ['xlsx', 'xls'] }],
+        multiple: false,
+      });
+
+      if (!filePath) return;
+
+      const hide = message.loading('正在解析并导入数据...', 0);
+
+      try {
+        const fileData = await readFile(filePath as string);
+        const wb = XLSX.read(fileData, { type: 'array' });
+        const firstSheet = wb.Sheets[wb.SheetNames[0]];
+        const jsonData: any[] = XLSX.utils.sheet_to_json(firstSheet);
+
+        if (jsonData.length === 0) {
+          hide();
+          message.warning('导入文件为空或无有效数据');
+          return;
+        }
+
+        const importPayload = jsonData.map(row => ({
+          name: row['商品名称'] || row['name'] || '',
+          barcode: String(row['条码'] || row['barcode'] || ''),
+          category: row['分类'] || row['category'] || '',
+          unit: row['单位'] || row['unit'] || '',
+          cost_price: Number(row['成本价'] || row['cost_price'] || 0),
+          sell_price: Number(row['销售价'] || row['sell_price'] || 0),
+          stock: Number(row['当前库存'] || row['初始库存'] || row['stock'] || 0),
+          min_stock: Number(row['安全库存'] || row['min_stock'] || 0),
+          status: (row['状态'] === '停售' || row['status'] === 'INACTIVE') ? 'INACTIVE' : 'ACTIVE',
+        })).filter(p => p.name && p.unit); // 过滤掉必填项为空的行
+
+        if (importPayload.length === 0) {
+          hide();
+          message.warning('没有找到有效的商品数据，请检查列名是否为：商品名称、条码、分类、单位、成本价、销售价、初始库存、安全库存、状态');
+          return;
+        }
+
+        const successCount = await invoke<number>('import_products', { products: importPayload });
+        
+        hide();
+        message.success(`成功导入 ${successCount} 条商品记录`);
+        
+        // 重新加载数据
+        loadProducts();
+        loadSettings();
+      } catch (error) {
+        hide();
+        console.error('导入处理失败:', error);
+        message.error(getTauriErrorMessage(error) || '导入失败，请检查文件格式');
+      }
+    } catch (error) {
+      console.error('选择文件失败:', error);
+    }
+  };
+
   const columns = [
     { title: 'ID', dataIndex: 'id', width: 60 },
     { title: '条码', dataIndex: 'barcode', width: 120 },
@@ -288,6 +348,9 @@ const Products = () => {
           />
           <Button type="primary" icon={<PlusOutlined />} onClick={handleAdd}>
             添加商品
+          </Button>
+          <Button icon={<UploadOutlined />} onClick={importFromExcel}>
+            导入商品
           </Button>
           <Button icon={<DownloadOutlined />} onClick={exportToExcel}>
             导出商品

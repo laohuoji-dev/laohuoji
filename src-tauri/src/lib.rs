@@ -122,6 +122,125 @@ async fn change_password(password: String, state: State<'_, AppState>) -> Result
     Ok(())
 }
 
+// 往来单位命令
+#[tauri::command]
+async fn get_customers(state: State<'_, AppState>) -> Result<Vec<serde_json::Value>, AppError> {
+    let db_guard = state
+        .db
+        .lock()
+        .map_err(|e| AppError::new("LOCK_ERROR", e.to_string()))?;
+    let db = db_guard
+        .as_ref()
+        .ok_or_else(|| AppError::new("DB_NOT_INIT", "数据库未初始化"))?;
+    db.get_customers()
+}
+
+#[tauri::command]
+async fn add_customer(
+    name: String,
+    contact: Option<String>,
+    phone: Option<String>,
+    state: State<'_, AppState>,
+) -> Result<i64, AppError> {
+    let mut db_guard = state
+        .db
+        .lock()
+        .map_err(|e| AppError::new("LOCK_ERROR", e.to_string()))?;
+    let db = db_guard
+        .as_mut()
+        .ok_or_else(|| AppError::new("DB_NOT_INIT", "数据库未初始化"))?;
+    db.add_customer(&name, contact.as_deref(), phone.as_deref())
+}
+
+#[tauri::command]
+async fn update_customer(
+    id: i64,
+    name: String,
+    contact: Option<String>,
+    phone: Option<String>,
+    state: State<'_, AppState>,
+) -> Result<(), AppError> {
+    let mut db_guard = state
+        .db
+        .lock()
+        .map_err(|e| AppError::new("LOCK_ERROR", e.to_string()))?;
+    let db = db_guard
+        .as_mut()
+        .ok_or_else(|| AppError::new("DB_NOT_INIT", "数据库未初始化"))?;
+    db.update_customer(id, &name, contact.as_deref(), phone.as_deref())
+}
+
+#[tauri::command]
+async fn delete_customer(id: i64, state: State<'_, AppState>) -> Result<(), AppError> {
+    let mut db_guard = state
+        .db
+        .lock()
+        .map_err(|e| AppError::new("LOCK_ERROR", e.to_string()))?;
+    let db = db_guard
+        .as_mut()
+        .ok_or_else(|| AppError::new("DB_NOT_INIT", "数据库未初始化"))?;
+    db.delete_customer(id)
+}
+
+#[tauri::command]
+async fn get_suppliers(state: State<'_, AppState>) -> Result<Vec<serde_json::Value>, AppError> {
+    let db_guard = state
+        .db
+        .lock()
+        .map_err(|e| AppError::new("LOCK_ERROR", e.to_string()))?;
+    let db = db_guard
+        .as_ref()
+        .ok_or_else(|| AppError::new("DB_NOT_INIT", "数据库未初始化"))?;
+    db.get_suppliers()
+}
+
+#[tauri::command]
+async fn add_supplier(
+    name: String,
+    contact: Option<String>,
+    phone: Option<String>,
+    state: State<'_, AppState>,
+) -> Result<i64, AppError> {
+    let mut db_guard = state
+        .db
+        .lock()
+        .map_err(|e| AppError::new("LOCK_ERROR", e.to_string()))?;
+    let db = db_guard
+        .as_mut()
+        .ok_or_else(|| AppError::new("DB_NOT_INIT", "数据库未初始化"))?;
+    db.add_supplier(&name, contact.as_deref(), phone.as_deref())
+}
+
+#[tauri::command]
+async fn update_supplier(
+    id: i64,
+    name: String,
+    contact: Option<String>,
+    phone: Option<String>,
+    state: State<'_, AppState>,
+) -> Result<(), AppError> {
+    let mut db_guard = state
+        .db
+        .lock()
+        .map_err(|e| AppError::new("LOCK_ERROR", e.to_string()))?;
+    let db = db_guard
+        .as_mut()
+        .ok_or_else(|| AppError::new("DB_NOT_INIT", "数据库未初始化"))?;
+    db.update_supplier(id, &name, contact.as_deref(), phone.as_deref())
+}
+
+#[tauri::command]
+async fn delete_supplier(id: i64, state: State<'_, AppState>) -> Result<(), AppError> {
+    let mut db_guard = state
+        .db
+        .lock()
+        .map_err(|e| AppError::new("LOCK_ERROR", e.to_string()))?;
+    let db = db_guard
+        .as_mut()
+        .ok_or_else(|| AppError::new("DB_NOT_INIT", "数据库未初始化"))?;
+    db.delete_supplier(id)
+}
+
 // 分类与单位管理命令
 #[tauri::command]
 async fn get_categories(state: State<'_, AppState>) -> Result<Vec<serde_json::Value>, AppError> {
@@ -271,6 +390,21 @@ async fn get_products(state: State<'_, AppState>) -> Result<Vec<serde_json::Valu
         .ok_or_else(|| AppError::new("DB_NOT_INIT", "数据库未初始化"))?;
 
     db.get_products()
+}
+
+#[tauri::command]
+async fn import_products(
+    products: Vec<serde_json::Value>,
+    state: State<'_, AppState>,
+) -> Result<usize, AppError> {
+    let mut db_guard = state
+        .db
+        .lock()
+        .map_err(|e| AppError::new("LOCK_ERROR", e.to_string()))?;
+    let db = db_guard
+        .as_mut()
+        .ok_or_else(|| AppError::new("DB_NOT_INIT", "数据库未初始化"))?;
+    db.import_products(products)
 }
 
 // 入库出库命令
@@ -561,6 +695,15 @@ pub fn run() {
             get_units,
             add_unit,
             delete_unit,
+            get_customers,
+            add_customer,
+            update_customer,
+            delete_customer,
+            get_suppliers,
+            add_supplier,
+            update_supplier,
+            delete_supplier,
+            import_products,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

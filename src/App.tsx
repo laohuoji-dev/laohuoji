@@ -10,6 +10,7 @@ import {
   FileTextOutlined,
   HistoryOutlined,
   SettingOutlined,
+  TeamOutlined,
 } from '@ant-design/icons';
 import { invoke } from '@tauri-apps/api/core';
 import Login from './pages/Login';
@@ -20,6 +21,7 @@ import Outbound from './pages/Outbound';
 import ChangePassword from './pages/ChangePassword';
 import Report from './pages/Report';
 import InventoryLogs from './pages/InventoryLogs';
+import Partners from './pages/Partners';
 import Settings from './pages/Settings';
 import './App.css';
 
@@ -57,6 +59,7 @@ function App() {
     { key: 'inbound', icon: <ShoppingCartOutlined />, label: '入库管理' },
     { key: 'outbound', icon: <SendOutlined />, label: '出库管理' },
     { key: 'inventory-logs', icon: <HistoryOutlined />, label: '库存流水' },
+    { key: 'partners', icon: <TeamOutlined />, label: '往来单位' },
     { key: 'report', icon: <FileTextOutlined />, label: '经营报告' },
   ];
 
@@ -70,6 +73,8 @@ function App() {
         return <Inbound />;
       case 'outbound':
         return <Outbound />;
+      case 'partners':
+        return <Partners />;
       case 'report':
         return <Report />;
       case 'inventory-logs':

@@ -1,11 +1,16 @@
 import { useEffect, useState } from 'react';
-import { Form, Select, InputNumber, Input, Button, Card, message, Space, Alert, Table, Tag, DatePicker } from 'antd';
+import { Form, Select, InputNumber, Button, Card, message, Space, Alert, Table, Tag, DatePicker } from 'antd';
 import { SendOutlined, DownloadOutlined } from '@ant-design/icons';
 import { invoke } from '@tauri-apps/api/core';
 import type { Dayjs } from 'dayjs';
 import * as XLSX from 'xlsx';
 import { getTauriAppError, getTauriErrorMessage } from '../utils/tauriError';
 import { getLowStockThreshold } from '../utils/settings';
+
+interface Customer {
+  id: number;
+  name: string;
+}
 
 interface Product {
   id: number;
@@ -30,6 +35,7 @@ interface OutboundRecord {
 
 const Outbound = () => {
   const [products, setProducts] = useState<Product[]>([]);
+  const [customers, setCustomers] = useState<Customer[]>([]);
   const [records, setRecords] = useState<OutboundRecord[]>([]);
   const [loading, setLoading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
@@ -39,9 +45,19 @@ const Outbound = () => {
 
   useEffect(() => {
     loadProducts();
+    loadCustomers();
     loadRecords();
     loadLowStockThreshold();
   }, []);
+
+  const loadCustomers = async () => {
+    try {
+      const data = await invoke<Customer[]>('get_customers');
+      setCustomers(data);
+    } catch (error) {
+      console.error('加载客户列表失败:', error);
+    }
+  };
 
   const loadLowStockThreshold = async () => {
     try {
@@ -220,7 +236,11 @@ const Outbound = () => {
           </Form.Item>
 
           <Form.Item name="customer" label="客户">
-            <Input placeholder="请输入客户名称（可选）" />
+            <Select placeholder="请选择客户" allowClear showSearch>
+              {customers.map(c => (
+                <Select.Option key={c.id} value={c.name}>{c.name}</Select.Option>
+              ))}
+            </Select>
           </Form.Item>
 
           {Number(quantity) > 0 && Number(price) > 0 && (

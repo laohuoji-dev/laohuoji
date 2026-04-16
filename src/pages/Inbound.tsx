@@ -1,11 +1,16 @@
 import { useEffect, useState } from 'react';
-import { Form, Select, InputNumber, Input, Button, Card, message, Space, Table, Tag, DatePicker } from 'antd';
+import { Form, Select, InputNumber, Button, Card, message, Space, Table, Tag, DatePicker } from 'antd';
 import { ShoppingCartOutlined, DownloadOutlined } from '@ant-design/icons';
 import { invoke } from '@tauri-apps/api/core';
 import type { Dayjs } from 'dayjs';
 import * as XLSX from 'xlsx';
 import { getTauriErrorMessage } from '../utils/tauriError';
 import { getLowStockThreshold } from '../utils/settings';
+
+interface Supplier {
+  id: number;
+  name: string;
+}
 
 interface Product {
   id: number;
@@ -30,6 +35,7 @@ interface InboundRecord {
 
 const Inbound = () => {
   const [products, setProducts] = useState<Product[]>([]);
+  const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [records, setRecords] = useState<InboundRecord[]>([]);
   const [loading, setLoading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
@@ -39,9 +45,19 @@ const Inbound = () => {
 
   useEffect(() => {
     loadProducts();
+    loadSuppliers();
     loadRecords();
     loadLowStockThreshold();
   }, []);
+
+  const loadSuppliers = async () => {
+    try {
+      const data = await invoke<Supplier[]>('get_suppliers');
+      setSuppliers(data);
+    } catch (error) {
+      console.error('加载供应商列表失败:', error);
+    }
+  };
 
   const loadLowStockThreshold = async () => {
     try {
@@ -194,7 +210,11 @@ const Inbound = () => {
           </Form.Item>
 
           <Form.Item name="supplier" label="供应商">
-            <Input placeholder="请输入供应商名称（可选）" />
+            <Select placeholder="请选择供应商" allowClear showSearch>
+              {suppliers.map(s => (
+                <Select.Option key={s.id} value={s.name}>{s.name}</Select.Option>
+              ))}
+            </Select>
           </Form.Item>
 
           {Number(quantity) > 0 && Number(price) > 0 && (
