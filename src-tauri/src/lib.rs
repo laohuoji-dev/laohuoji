@@ -516,6 +516,40 @@ async fn get_weekly_report(state: State<'_, AppState>) -> Result<serde_json::Val
     db.get_weekly_report()
 }
 
+#[tauri::command]
+async fn get_customer_statement(
+    customer: Option<String>,
+    start_date: Option<String>,
+    end_date: Option<String>,
+    state: State<'_, AppState>,
+) -> Result<serde_json::Value, AppError> {
+    let db_guard = state
+        .db
+        .lock()
+        .map_err(|e| AppError::new("LOCK_ERROR", e.to_string()))?;
+    let db = db_guard
+        .as_ref()
+        .ok_or_else(|| AppError::new("DB_NOT_INIT", "数据库未初始化"))?;
+    db.get_customer_statement(customer.as_deref(), start_date.as_deref(), end_date.as_deref())
+}
+
+#[tauri::command]
+async fn get_supplier_statement(
+    supplier: Option<String>,
+    start_date: Option<String>,
+    end_date: Option<String>,
+    state: State<'_, AppState>,
+) -> Result<serde_json::Value, AppError> {
+    let db_guard = state
+        .db
+        .lock()
+        .map_err(|e| AppError::new("LOCK_ERROR", e.to_string()))?;
+    let db = db_guard
+        .as_ref()
+        .ok_or_else(|| AppError::new("DB_NOT_INIT", "数据库未初始化"))?;
+    db.get_supplier_statement(supplier.as_deref(), start_date.as_deref(), end_date.as_deref())
+}
+
 // 库存预警命令
 #[tauri::command]
 async fn get_low_stock_products(
@@ -681,6 +715,8 @@ pub fn run() {
             get_sales_trend,
             get_slow_moving_products,
             get_weekly_report,
+            get_customer_statement,
+            get_supplier_statement,
             get_low_stock_products,
             get_low_stock_threshold,
             set_low_stock_threshold,

@@ -586,6 +586,203 @@ impl Database {
         Ok(())
     }
 
+    pub fn get_customers(&self) -> Result<Vec<serde_json::Value>, AppError> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, name, contact, phone, created_at FROM customers ORDER BY id DESC",
+        )?;
+        let rows = stmt.query_map([], |row| {
+            Ok(serde_json::json!({
+                "id": row.get::<_, i64>(0)?,
+                "name": row.get::<_, String>(1)?,
+                "contact": row.get::<_, Option<String>>(2)?,
+                "phone": row.get::<_, Option<String>>(3)?,
+                "created_at": row.get::<_, String>(4)?,
+            }))
+        })?;
+        let mut result = Vec::new();
+        for row in rows {
+            result.push(row?);
+        }
+        Ok(result)
+    }
+
+    pub fn add_customer(
+        &mut self,
+        name: &str,
+        contact: Option<&str>,
+        phone: Option<&str>,
+    ) -> Result<i64, AppError> {
+        if name.trim().is_empty() {
+            return Err(AppError::new("VALIDATION_ERROR", "客户名称不能为空"));
+        }
+        match self.conn.execute(
+            "INSERT INTO customers (name, contact, phone) VALUES (?, ?, ?)",
+            params![name, contact, phone],
+        ) {
+            Ok(_) => Ok(self.conn.last_insert_rowid()),
+            Err(rusqlite::Error::SqliteFailure(e, _))
+                if e.code == rusqlite::ffi::ErrorCode::ConstraintViolation =>
+            {
+                Err(AppError::new("VALIDATION_ERROR", "客户名称已存在"))
+            }
+            Err(e) => Err(e.into()),
+        }
+    }
+
+    pub fn update_customer(
+        &mut self,
+        id: i64,
+        name: &str,
+        contact: Option<&str>,
+        phone: Option<&str>,
+    ) -> Result<(), AppError> {
+        if name.trim().is_empty() {
+            return Err(AppError::new("VALIDATION_ERROR", "客户名称不能为空"));
+        }
+        match self.conn.execute(
+            "UPDATE customers SET name = ?, contact = ?, phone = ? WHERE id = ?",
+            params![name, contact, phone, id],
+        ) {
+            Ok(_) => Ok(()),
+            Err(rusqlite::Error::SqliteFailure(e, _))
+                if e.code == rusqlite::ffi::ErrorCode::ConstraintViolation =>
+            {
+                Err(AppError::new("VALIDATION_ERROR", "客户名称已存在"))
+            }
+            Err(e) => Err(e.into()),
+        }
+    }
+
+    pub fn delete_customer(&mut self, id: i64) -> Result<(), AppError> {
+        self.conn
+            .execute("DELETE FROM customers WHERE id = ?", params![id])?;
+        Ok(())
+    }
+
+    pub fn get_suppliers(&self) -> Result<Vec<serde_json::Value>, AppError> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, name, contact, phone, created_at FROM suppliers ORDER BY id DESC",
+        )?;
+        let rows = stmt.query_map([], |row| {
+            Ok(serde_json::json!({
+                "id": row.get::<_, i64>(0)?,
+                "name": row.get::<_, String>(1)?,
+                "contact": row.get::<_, Option<String>>(2)?,
+                "phone": row.get::<_, Option<String>>(3)?,
+                "created_at": row.get::<_, String>(4)?,
+            }))
+        })?;
+        let mut result = Vec::new();
+        for row in rows {
+            result.push(row?);
+        }
+        Ok(result)
+    }
+
+    pub fn add_supplier(
+        &mut self,
+        name: &str,
+        contact: Option<&str>,
+        phone: Option<&str>,
+    ) -> Result<i64, AppError> {
+        if name.trim().is_empty() {
+            return Err(AppError::new("VALIDATION_ERROR", "供应商名称不能为空"));
+        }
+        match self.conn.execute(
+            "INSERT INTO suppliers (name, contact, phone) VALUES (?, ?, ?)",
+            params![name, contact, phone],
+        ) {
+            Ok(_) => Ok(self.conn.last_insert_rowid()),
+            Err(rusqlite::Error::SqliteFailure(e, _))
+                if e.code == rusqlite::ffi::ErrorCode::ConstraintViolation =>
+            {
+                Err(AppError::new("VALIDATION_ERROR", "供应商名称已存在"))
+            }
+            Err(e) => Err(e.into()),
+        }
+    }
+
+    pub fn update_supplier(
+        &mut self,
+        id: i64,
+        name: &str,
+        contact: Option<&str>,
+        phone: Option<&str>,
+    ) -> Result<(), AppError> {
+        if name.trim().is_empty() {
+            return Err(AppError::new("VALIDATION_ERROR", "供应商名称不能为空"));
+        }
+        match self.conn.execute(
+            "UPDATE suppliers SET name = ?, contact = ?, phone = ? WHERE id = ?",
+            params![name, contact, phone, id],
+        ) {
+            Ok(_) => Ok(()),
+            Err(rusqlite::Error::SqliteFailure(e, _))
+                if e.code == rusqlite::ffi::ErrorCode::ConstraintViolation =>
+            {
+                Err(AppError::new("VALIDATION_ERROR", "供应商名称已存在"))
+            }
+            Err(e) => Err(e.into()),
+        }
+    }
+
+    pub fn delete_supplier(&mut self, id: i64) -> Result<(), AppError> {
+        self.conn
+            .execute("DELETE FROM suppliers WHERE id = ?", params![id])?;
+        Ok(())
+    }
+
+    pub fn import_products(&mut self, products: Vec<serde_json::Value>) -> Result<usize, AppError> {
+        let tx = self.conn.transaction()?;
+        let mut count = 0usize;
+
+        for p in products {
+            let name = p["name"].as_str().unwrap_or("").trim();
+            if name.is_empty() {
+                continue;
+            }
+
+            let category = p["category"].as_str().unwrap_or("").trim();
+            let unit = p["unit"].as_str().unwrap_or("").trim();
+            if unit.is_empty() {
+                continue;
+            }
+
+            let cost_price = p["cost_price"].as_f64().unwrap_or(0.0);
+            let sell_price = p["sell_price"].as_f64().unwrap_or(0.0);
+            let stock = p["stock"].as_i64().unwrap_or(0) as i32;
+            let barcode = p["barcode"].as_str().map(|s| s.trim()).filter(|s| !s.is_empty());
+            let status = p["status"].as_str().unwrap_or("ACTIVE");
+            let min_stock = p["min_stock"].as_i64().unwrap_or(0) as i32;
+
+            if !category.is_empty() {
+                tx.execute(
+                    "INSERT OR IGNORE INTO categories (name) VALUES (?)",
+                    params![category],
+                )?;
+            }
+            tx.execute("INSERT OR IGNORE INTO units (name) VALUES (?)", params![unit])?;
+
+            tx.execute(
+                "INSERT INTO products (name, category, unit, cost_price, sell_price, stock, barcode, status, min_stock) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                params![name, category, unit, cost_price, sell_price, stock, barcode, status, min_stock],
+            )?;
+            let product_id = tx.last_insert_rowid();
+
+            if stock > 0 {
+                tx.execute(
+                    "INSERT INTO inventory_logs (product_id, change_type, quantity, previous_stock, current_stock) VALUES (?, 'CREATE', ?, 0, ?)",
+                    params![product_id, stock, stock],
+                )?;
+            }
+
+            count += 1;
+        }
+
+        tx.commit()?;
+        Ok(count)
+    }
+
     pub fn get_products(&self) -> Result<Vec<serde_json::Value>, AppError> {
         let mut stmt = self.conn.prepare(
             "SELECT id, name, category, unit, cost_price, sell_price, stock, barcode, status, min_stock, created_at, updated_at FROM products ORDER BY id DESC"
@@ -986,6 +1183,205 @@ impl Database {
                 "inbound_count": previous_inbound_count,
                 "outbound_count": previous_outbound_count,
             }
+        }))
+    }
+
+    pub fn get_customer_statement(
+        &self,
+        customer: Option<&str>,
+        start_date: Option<&str>,
+        end_date: Option<&str>,
+    ) -> Result<serde_json::Value, AppError> {
+        let (customer_filter, customer_param): (&str, Option<&str>) = match customer {
+            Some(v) if !v.trim().is_empty() => (" AND o.customer = ? ", Some(v)),
+            _ => ("", None),
+        };
+
+        let (date_filter, date_params): (&str, Vec<&str>) = match (start_date, end_date) {
+            (Some(start), Some(end)) => (" AND date(o.created_at) BETWEEN ? AND ? ", vec![start, end]),
+            _ => ("", vec![]),
+        };
+
+        let mut summary_params: Vec<&str> = Vec::new();
+        if let Some(v) = customer_param {
+            summary_params.push(v);
+        }
+        summary_params.extend(date_params.iter().copied());
+
+        let summary_sql = format!(
+            "SELECT
+                COALESCE(SUM(o.total), 0) AS sales_total,
+                COALESCE(SUM(o.quantity), 0) AS quantity_total,
+                COALESCE(SUM(o.quantity * p.cost_price), 0) AS cost_total,
+                COALESCE(SUM(o.quantity * (o.price - p.cost_price)), 0) AS profit_total,
+                COUNT(*) AS order_count,
+                COUNT(DISTINCT o.product_id) AS product_count
+             FROM outbound_orders o
+             JOIN products p ON o.product_id = p.id
+             WHERE 1 = 1 {} {}",
+            customer_filter, date_filter
+        );
+
+        let summary: serde_json::Value = self.conn.query_row(
+            &summary_sql,
+            rusqlite::params_from_iter(summary_params.iter()),
+            |row| {
+                Ok(serde_json::json!({
+                    "sales_total": row.get::<_, f64>(0)?,
+                    "quantity_total": row.get::<_, i64>(1)?,
+                    "cost_total": row.get::<_, f64>(2)?,
+                    "profit_total": row.get::<_, f64>(3)?,
+                    "order_count": row.get::<_, i64>(4)?,
+                    "product_count": row.get::<_, i64>(5)?,
+                }))
+            },
+        )?;
+
+        let mut items_params: Vec<&str> = Vec::new();
+        if let Some(v) = customer_param {
+            items_params.push(v);
+        }
+        items_params.extend(date_params.iter().copied());
+
+        let items_sql = format!(
+            "SELECT
+                p.id,
+                p.name,
+                p.unit,
+                COALESCE(SUM(o.quantity), 0) AS quantity,
+                COALESCE(SUM(o.total), 0) AS sales_total,
+                COALESCE(SUM(o.quantity * p.cost_price), 0) AS cost_total,
+                COALESCE(SUM(o.quantity * (o.price - p.cost_price)), 0) AS profit_total
+             FROM outbound_orders o
+             JOIN products p ON o.product_id = p.id
+             WHERE 1 = 1 {} {}
+             GROUP BY p.id
+             ORDER BY sales_total DESC",
+            customer_filter, date_filter
+        );
+
+        let mut stmt = self.conn.prepare(&items_sql)?;
+        let rows = stmt.query_map(
+            rusqlite::params_from_iter(items_params.iter()),
+            |row| {
+                Ok(serde_json::json!({
+                    "product_id": row.get::<_, i64>(0)?,
+                    "product_name": row.get::<_, String>(1)?,
+                    "unit": row.get::<_, String>(2)?,
+                    "quantity": row.get::<_, i64>(3)?,
+                    "sales_total": row.get::<_, f64>(4)?,
+                    "cost_total": row.get::<_, f64>(5)?,
+                    "profit_total": row.get::<_, f64>(6)?,
+                }))
+            },
+        )?;
+        let mut items = Vec::new();
+        for row in rows {
+            items.push(row?);
+        }
+
+        Ok(serde_json::json!({
+            "type": "customer",
+            "name": customer.unwrap_or(""),
+            "start_date": start_date,
+            "end_date": end_date,
+            "summary": summary,
+            "items": items
+        }))
+    }
+
+    pub fn get_supplier_statement(
+        &self,
+        supplier: Option<&str>,
+        start_date: Option<&str>,
+        end_date: Option<&str>,
+    ) -> Result<serde_json::Value, AppError> {
+        let (supplier_filter, supplier_param): (&str, Option<&str>) = match supplier {
+            Some(v) if !v.trim().is_empty() => (" AND o.supplier = ? ", Some(v)),
+            _ => ("", None),
+        };
+
+        let (date_filter, date_params): (&str, Vec<&str>) = match (start_date, end_date) {
+            (Some(start), Some(end)) => (" AND date(o.created_at) BETWEEN ? AND ? ", vec![start, end]),
+            _ => ("", vec![]),
+        };
+
+        let mut summary_params: Vec<&str> = Vec::new();
+        if let Some(v) = supplier_param {
+            summary_params.push(v);
+        }
+        summary_params.extend(date_params.iter().copied());
+
+        let summary_sql = format!(
+            "SELECT
+                COALESCE(SUM(o.total), 0) AS purchase_total,
+                COALESCE(SUM(o.quantity), 0) AS quantity_total,
+                COUNT(*) AS order_count,
+                COUNT(DISTINCT o.product_id) AS product_count
+             FROM inbound_orders o
+             WHERE 1 = 1 {} {}",
+            supplier_filter, date_filter
+        );
+
+        let summary: serde_json::Value = self.conn.query_row(
+            &summary_sql,
+            rusqlite::params_from_iter(summary_params.iter()),
+            |row| {
+                Ok(serde_json::json!({
+                    "purchase_total": row.get::<_, f64>(0)?,
+                    "quantity_total": row.get::<_, i64>(1)?,
+                    "order_count": row.get::<_, i64>(2)?,
+                    "product_count": row.get::<_, i64>(3)?,
+                }))
+            },
+        )?;
+
+        let mut items_params: Vec<&str> = Vec::new();
+        if let Some(v) = supplier_param {
+            items_params.push(v);
+        }
+        items_params.extend(date_params.iter().copied());
+
+        let items_sql = format!(
+            "SELECT
+                p.id,
+                p.name,
+                p.unit,
+                COALESCE(SUM(o.quantity), 0) AS quantity,
+                COALESCE(SUM(o.total), 0) AS purchase_total
+             FROM inbound_orders o
+             JOIN products p ON o.product_id = p.id
+             WHERE 1 = 1 {} {}
+             GROUP BY p.id
+             ORDER BY purchase_total DESC",
+            supplier_filter, date_filter
+        );
+
+        let mut stmt = self.conn.prepare(&items_sql)?;
+        let rows = stmt.query_map(
+            rusqlite::params_from_iter(items_params.iter()),
+            |row| {
+                Ok(serde_json::json!({
+                    "product_id": row.get::<_, i64>(0)?,
+                    "product_name": row.get::<_, String>(1)?,
+                    "unit": row.get::<_, String>(2)?,
+                    "quantity": row.get::<_, i64>(3)?,
+                    "purchase_total": row.get::<_, f64>(4)?,
+                }))
+            },
+        )?;
+        let mut items = Vec::new();
+        for row in rows {
+            items.push(row?);
+        }
+
+        Ok(serde_json::json!({
+            "type": "supplier",
+            "name": supplier.unwrap_or(""),
+            "start_date": start_date,
+            "end_date": end_date,
+            "summary": summary,
+            "items": items
         }))
     }
 

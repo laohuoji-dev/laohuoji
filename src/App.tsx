@@ -8,6 +8,7 @@ import {
   LogoutOutlined,
   LockOutlined,
   FileTextOutlined,
+  FileDoneOutlined,
   HistoryOutlined,
   SettingOutlined,
   TeamOutlined,
@@ -22,6 +23,7 @@ import ChangePassword from './pages/ChangePassword';
 import Report from './pages/Report';
 import InventoryLogs from './pages/InventoryLogs';
 import Partners from './pages/Partners';
+import Statements from './pages/Statements';
 import Settings from './pages/Settings';
 import './App.css';
 
@@ -60,6 +62,7 @@ function App() {
     { key: 'outbound', icon: <SendOutlined />, label: '出库管理' },
     { key: 'inventory-logs', icon: <HistoryOutlined />, label: '库存流水' },
     { key: 'partners', icon: <TeamOutlined />, label: '往来单位' },
+    { key: 'statements', icon: <FileDoneOutlined />, label: '对账与统计' },
     { key: 'report', icon: <FileTextOutlined />, label: '经营报告' },
   ];
 
@@ -75,6 +78,8 @@ function App() {
         return <Outbound />;
       case 'partners':
         return <Partners />;
+      case 'statements':
+        return <Statements />;
       case 'report':
         return <Report />;
       case 'inventory-logs':
