@@ -10,9 +10,11 @@ import { getLowStockThreshold } from '../utils/settings';
 interface Product {
   id: number;
   name: string;
-  stock: number;
   unit: string;
   sell_price: number;
+  stock: number;
+  barcode?: string;
+  status: string;
 }
 
 interface OutboundRecord {
@@ -53,10 +55,10 @@ const Outbound = () => {
   const loadProducts = async () => {
     setLoading(true);
     try {
-      const data = await invoke<any[]>('get_products');
-      setProducts(data);
+      const data = await invoke<Product[]>('get_products');
+      setProducts(data.filter(p => p.status === 'ACTIVE'));
     } catch (error) {
-      message.error('加载商品列表失败');
+      message.error(getTauriErrorMessage(error) || '加载商品列表失败');
       console.error(error);
     } finally {
       setLoading(false);

@@ -41,7 +41,8 @@ impl Database {
                 self.migrate_to_v2()?;
                 self.migrate_to_v3()?;
                 self.migrate_to_v4()?;
-                self.conn.execute_batch("PRAGMA user_version = 4;")?;
+                self.migrate_to_v5()?;
+                self.conn.execute_batch("PRAGMA user_version = 5;")?;
                 Ok(())
             }
             1 => {
@@ -49,23 +50,32 @@ impl Database {
                 self.migrate_to_v2()?;
                 self.migrate_to_v3()?;
                 self.migrate_to_v4()?;
-                self.conn.execute_batch("PRAGMA user_version = 4;")?;
+                self.migrate_to_v5()?;
+                self.conn.execute_batch("PRAGMA user_version = 5;")?;
                 Ok(())
             }
             2 => {
                 self.ensure_indexes()?;
                 self.migrate_to_v3()?;
                 self.migrate_to_v4()?;
-                self.conn.execute_batch("PRAGMA user_version = 4;")?;
+                self.migrate_to_v5()?;
+                self.conn.execute_batch("PRAGMA user_version = 5;")?;
                 Ok(())
             }
             3 => {
                 self.ensure_indexes()?;
                 self.migrate_to_v4()?;
-                self.conn.execute_batch("PRAGMA user_version = 4;")?;
+                self.migrate_to_v5()?;
+                self.conn.execute_batch("PRAGMA user_version = 5;")?;
                 Ok(())
             }
-            4 => self.ensure_indexes(),
+            4 => {
+                self.ensure_indexes()?;
+                self.migrate_to_v5()?;
+                self.conn.execute_batch("PRAGMA user_version = 5;")?;
+                Ok(())
+            }
+            5 => self.ensure_indexes(),
             other => Err(AppError::new(
                 "DB_VERSION_UNSUPPORTED",
                 format!("数据库版本不支持: {}", other),
@@ -215,6 +225,18 @@ impl Database {
         Ok(())
     }
 
+    fn migrate_to_v5(&self) -> Result<(), AppError> {
+        self.conn.execute_batch(
+            "
+            ALTER TABLE products ADD COLUMN barcode TEXT;
+            ALTER TABLE products ADD COLUMN status TEXT NOT NULL DEFAULT 'ACTIVE';
+            ALTER TABLE products ADD COLUMN min_stock INTEGER NOT NULL DEFAULT 0;
+            CREATE INDEX IF NOT EXISTS idx_products_barcode ON products(barcode);
+            ",
+        )?;
+        Ok(())
+    }
+
     pub fn get_low_stock_threshold(&self) -> Result<i32, AppError> {
         let result: Result<String, rusqlite::Error> = self.conn.query_row(
             "SELECT value FROM app_settings WHERE key = 'low_stock_threshold'",
@@ -278,6 +300,9 @@ impl Database {
         cost_price: f64,
         sell_price: f64,
         stock: i32,
+        barcode: Option<&str>,
+        status: &str,
+        min_stock: i32,
     ) -> Result<i64, AppError> {
         if name.trim().is_empty() {
             return Err(AppError::new("VALIDATION_ERROR", "商品名称不能为空"));
@@ -295,8 +320,8 @@ impl Database {
         let tx = self.conn.transaction()?;
 
         tx.execute(
-            "INSERT INTO products (name, category, unit, cost_price, sell_price, stock) VALUES (?, ?, ?, ?, ?, ?)",
-            params![name, category, unit, cost_price, sell_price, stock],
+            "INSERT INTO products (name, category, unit, cost_price, sell_price, stock, barcode, status, min_stock) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            params![name, category, unit, cost_price, sell_price, stock, barcode, status, min_stock],
         )?;
 
         let product_id = tx.last_insert_rowid();
@@ -321,6 +346,9 @@ impl Database {
         cost_price: f64,
         sell_price: f64,
         stock: i32,
+        barcode: Option<&str>,
+        status: &str,
+        min_stock: i32,
     ) -> Result<(), AppError> {
         if name.trim().is_empty() {
             return Err(AppError::new("VALIDATION_ERROR", "商品名称不能为空"));
@@ -344,8 +372,8 @@ impl Database {
         )?;
 
         tx.execute(
-            "UPDATE products SET name = ?, category = ?, unit = ?, cost_price = ?, sell_price = ?, stock = ?, updated_at = datetime('now', 'localtime') WHERE id = ?",
-            params![name, category, unit, cost_price, sell_price, stock, id],
+            "UPDATE products SET name = ?, category = ?, unit = ?, cost_price = ?, sell_price = ?, stock = ?, barcode = ?, status = ?, min_stock = ?, updated_at = datetime('now', 'localtime') WHERE id = ?",
+            params![name, category, unit, cost_price, sell_price, stock, barcode, status, min_stock, id],
         )?;
 
         let diff = stock - previous_stock;
@@ -387,20 +415,23 @@ impl Database {
 
     pub fn get_products(&self) -> Result<Vec<serde_json::Value>, AppError> {
         let mut stmt = self.conn.prepare(
-            "SELECT id, name, category, unit, cost_price, sell_price, stock, created_at, updated_at FROM products ORDER BY id DESC"
+            "SELECT id, name, category, unit, cost_price, sell_price, stock, barcode, status, min_stock, created_at, updated_at FROM products ORDER BY id DESC"
         )?;
 
         let rows = stmt.query_map([], |row| {
             Ok(serde_json::json!({
                 "id": row.get::<_, i64>(0)?,
                 "name": row.get::<_, String>(1)?,
-                "category": row.get::<_, String>(2)?,
+                "category": row.get::<_, Option<String>>(2)?,
                 "unit": row.get::<_, String>(3)?,
                 "cost_price": row.get::<_, f64>(4)?,
                 "sell_price": row.get::<_, f64>(5)?,
                 "stock": row.get::<_, i32>(6)?,
-                "created_at": row.get::<_, String>(7)?,
-                "updated_at": row.get::<_, String>(8)?,
+                "barcode": row.get::<_, Option<String>>(7)?,
+                "status": row.get::<_, String>(8)?,
+                "min_stock": row.get::<_, i32>(9)?,
+                "created_at": row.get::<_, String>(10)?,
+                "updated_at": row.get::<_, String>(11)?,
             }))
         })?;
 

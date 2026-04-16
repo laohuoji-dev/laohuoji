@@ -26,4 +26,5 @@ rusqlite = { version = "0.32", features = ["bundled"] }
 bcrypt = "0.16"
 chrono = "0.4"
 tauri-plugin-dialog = "2.7.0"
+tauri-plugin-fs = "2.5.0"
 

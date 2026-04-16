@@ -1,7 +1,10 @@
-import { useEffect, useState, useRef } from 'react';
-import { Table, Button, Modal, Form, Input, InputNumber, Space, message, Popconfirm } from 'antd';
-import { PlusOutlined, EditOutlined, DeleteOutlined, SearchOutlined } from '@ant-design/icons';
+import { useEffect, useState } from 'react';
+import { Table, Button, Modal, Form, Input, InputNumber, Space, message, Popconfirm, Select, Tooltip, Tag } from 'antd';
+import { PlusOutlined, EditOutlined, DeleteOutlined, SearchOutlined, QuestionCircleOutlined, DownloadOutlined } from '@ant-design/icons';
 import { invoke } from '@tauri-apps/api/core';
+import { save } from '@tauri-apps/plugin-dialog';
+import { writeFile } from '@tauri-apps/plugin-fs';
+import * as XLSX from 'xlsx';
 import { getFirstLetter, toPinyin } from '../utils/pinyin';
 import { getTauriAppError, getTauriErrorMessage } from '../utils/tauriError';
 import { getLowStockThreshold } from '../utils/settings';
@@ -14,16 +17,20 @@ interface Product {
   cost_price: number;
   sell_price: number;
   stock: number;
+  barcode?: string;
+  status: string;
+  min_stock: number;
   created_at: string;
   updated_at: string;
 }
 
-interface Suggestion {
-  category: string;
-  unit: string;
-  cost_price: number;
-  sell_price: number;
-}
+// interface Suggestion {
+//   name: string;
+//   category: string;
+//   unit: string;
+//   cost_price: number;
+//   sell_price: number;
+// }
 
 const Products = () => {
   const [products, setProducts] = useState<Product[]>([]);
@@ -32,11 +39,8 @@ const Products = () => {
   const [modalVisible, setModalVisible] = useState(false);
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
   const [searchText, setSearchText] = useState('');
-  const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
-  const [showSuggestions, setShowSuggestions] = useState(false);
   const [lowStockThreshold, setLowStockThreshold] = useState<number>(10);
   const [form] = Form.useForm();
-  const suggestTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     loadProducts();
@@ -60,6 +64,7 @@ const Products = () => {
       const filtered = products.filter(p => {
         // Match original text
         if (p.name.toLowerCase().includes(searchLower)) return true;
+        if (p.barcode && p.barcode.toLowerCase().includes(searchLower)) return true;
         if (p.category && p.category.toLowerCase().includes(searchLower)) return true;
         // Match pinyin first letter
         if (getFirstLetter(p.name).includes(searchLower)) return true;
@@ -86,43 +91,10 @@ const Products = () => {
     }
   };
 
-  const fetchSuggestions = async (name: string) => {
-    if (name.length < 1) {
-      setSuggestions([]);
-      setShowSuggestions(false);
-      return;
-    }
-    try {
-      const data = await invoke<Suggestion[]>('get_product_suggestions', { name });
-      setSuggestions(data);
-      setShowSuggestions(data.length > 0);
-    } catch {
-      setSuggestions([]);
-      setShowSuggestions(false);
-    }
-  };
-
-  const handleNameSearch = (value: string) => {
-    if (suggestTimer.current) clearTimeout(suggestTimer.current);
-    suggestTimer.current = setTimeout(() => fetchSuggestions(value), 300);
-  };
-
-  const applySuggestion = (s: Suggestion) => {
-    form.setFieldsValue({
-      category: s.category,
-      unit: s.unit,
-      cost_price: s.cost_price,
-      sell_price: s.sell_price,
-    });
-    setShowSuggestions(false);
-    message.success('已自动填充推荐值');
-  };
-
   const handleAdd = () => {
     setEditingProduct(null);
     form.resetFields();
-    setSuggestions([]);
-    setShowSuggestions(false);
+    form.setFieldsValue({ status: 'ACTIVE', min_stock: 0 });
     setModalVisible(true);
   };
 
@@ -171,8 +143,59 @@ const Products = () => {
     }
   };
 
+  const exportToExcel = async () => {
+    try {
+      const filePath = await save({
+        title: '导出商品列表',
+        defaultPath: `商品列表_${new Date().toISOString().slice(0, 10)}.xlsx`,
+        filters: [{ name: 'Excel', extensions: ['xlsx'] }],
+      });
+
+      if (!filePath) return;
+
+      const hide = message.loading('正在导出数据...', 0);
+
+      // 准备导出数据
+      const exportData = filteredProducts.map((p) => ({
+        '商品ID': p.id,
+        '条码': p.barcode || '',
+        '商品名称': p.name,
+        '分类': p.category,
+        '单位': p.unit,
+        '成本价': p.cost_price,
+        '销售价': p.sell_price,
+        '当前库存': p.stock,
+        '安全库存': p.min_stock,
+        '状态': p.status === 'ACTIVE' ? '在售' : '停售',
+      }));
+
+      const wb = XLSX.utils.book_new();
+      const ws = XLSX.utils.json_to_sheet(exportData);
+      
+      // 设置列宽
+      ws['!cols'] = [
+        { wch: 10 }, { wch: 15 }, { wch: 20 }, { wch: 15 },
+        { wch: 8 }, { wch: 10 }, { wch: 10 }, { wch: 10 },
+        { wch: 10 }, { wch: 10 }
+      ];
+
+      XLSX.utils.book_append_sheet(wb, ws, '商品列表');
+      
+      // 写入文件
+      const excelBuffer = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
+      await writeFile(filePath, new Uint8Array(excelBuffer));
+      
+      hide();
+      message.success('导出成功');
+    } catch (error) {
+      console.error('导出失败:', error);
+      message.error(getTauriErrorMessage(error) || '导出失败');
+    }
+  };
+
   const columns = [
     { title: 'ID', dataIndex: 'id', width: 60 },
+    { title: '条码', dataIndex: 'barcode', width: 120 },
     { title: '商品名称', dataIndex: 'name', width: 150 },
     { title: '分类', dataIndex: 'category', width: 100 },
     { title: '单位', dataIndex: 'unit', width: 80 },
@@ -189,14 +212,28 @@ const Products = () => {
       render: (val: number) => `¥${val.toFixed(2)}`,
     },
     {
+      title: '状态',
+      dataIndex: 'status',
+      width: 80,
+      render: (val: string) => (
+        <Tag color={val === 'ACTIVE' ? 'success' : 'default'}>
+          {val === 'ACTIVE' ? '在售' : '停售'}
+        </Tag>
+      ),
+    },
+    {
       title: '库存',
       dataIndex: 'stock',
       width: 80,
-      render: (val: number) => (
-        <span style={{ color: val < lowStockThreshold ? '#cf1322' : '#3f8600' }}>
-          {val}
-        </span>
-      ),
+      render: (val: number, record: Product) => {
+        // 如果该商品设置了特定的安全库存，且大于0，则使用该特定值；否则使用全局阈值
+        const threshold = (record.min_stock && record.min_stock > 0) ? record.min_stock : lowStockThreshold;
+        return (
+          <span style={{ color: val < threshold ? '#cf1322' : '#3f8600' }}>
+            {val}
+          </span>
+        );
+      },
     },
     {
       title: '操作',
@@ -234,7 +271,7 @@ const Products = () => {
         <h2>商品管理</h2>
         <Space>
           <Input
-            placeholder="搜索商品名称或分类"
+            placeholder="搜索名称、条码、分类、拼音..."
             prefix={<SearchOutlined />}
             value={searchText}
             onChange={(e) => setSearchText(e.target.value)}
@@ -243,6 +280,9 @@ const Products = () => {
           />
           <Button type="primary" icon={<PlusOutlined />} onClick={handleAdd}>
             添加商品
+          </Button>
+          <Button icon={<DownloadOutlined />} onClick={exportToExcel}>
+            导出商品
           </Button>
         </Space>
       </div>
@@ -264,52 +304,16 @@ const Products = () => {
         width={600}
       >
         <Form form={form} onFinish={handleSubmit} layout="vertical">
+          <Form.Item name="name" label="商品名称" rules={[{ required: true, message: '请输入商品名称' }]}>
+            <Input placeholder="请输入商品名称" />
+          </Form.Item>
+
           <Form.Item
-            name="name"
-            label="商品名称"
-            rules={[{ required: true, message: '请输入商品名称' }]}
+            name="barcode"
+            label="商品条码"
+            tooltip="支持扫码枪直接录入，为空则仅靠名称识别"
           >
-            <div style={{ position: 'relative' }}>
-              <Input
-                placeholder="请输入商品名称"
-                onChange={(e) => handleNameSearch(e.target.value)}
-                onFocus={() => { if (suggestions.length > 0) setShowSuggestions(true); }}
-                onBlur={() => { setTimeout(() => setShowSuggestions(false), 200); }}
-              />
-              {showSuggestions && suggestions.length > 0 && (
-                <div style={{
-                  position: 'absolute',
-                  top: '100%',
-                  left: 0,
-                  right: 0,
-                  background: '#fff',
-                  border: '1px solid #d9d9d9',
-                  borderRadius: 4,
-                  boxShadow: '0 2px 8px rgba(0,0,0,0.15)',
-                  zIndex: 1000,
-                  maxHeight: 200,
-                  overflowY: 'auto',
-                }}>
-                  {suggestions.map((s, i) => (
-                    <div
-                      key={i}
-                      style={{
-                        padding: '8px 12px',
-                        cursor: 'pointer',
-                        borderBottom: i < suggestions.length - 1 ? '1px solid #f0f0f0' : 'none',
-                      }}
-                      onMouseDown={() => applySuggestion(s)}
-                      onMouseEnter={(e) => (e.currentTarget.style.background = '#f5f5f5')}
-                      onMouseLeave={(e) => (e.currentTarget.style.background = '#fff')}
-                    >
-                      <div style={{ fontSize: 12, color: '#666' }}>
-                        分类: {s.category} | 单位: {s.unit} | 成本: ¥{s.cost_price.toFixed(2)} | 售价: ¥{s.sell_price.toFixed(2)}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
+            <Input placeholder="选填，如: 6901234567890" />
           </Form.Item>
 
           <Form.Item
@@ -364,6 +368,18 @@ const Products = () => {
               placeholder="请输入初始库存"
             />
           </Form.Item>
+
+          <Space style={{ display: 'flex', width: '100%' }}>
+            <Form.Item name="min_stock" label={<span>安全库存 <Tooltip title="当库存低于此值时触发预警，填0则使用全局配置"><QuestionCircleOutlined /></Tooltip></span>} style={{ flex: 1 }}>
+              <InputNumber min={0} style={{ width: '100%' }} placeholder="商品专属预警值" />
+            </Form.Item>
+            <Form.Item name="status" label="状态" rules={[{ required: true }]} style={{ flex: 1 }}>
+              <Select>
+                <Select.Option value="ACTIVE">在售</Select.Option>
+                <Select.Option value="INACTIVE">停售 (归档)</Select.Option>
+              </Select>
+            </Form.Item>
+          </Space>
         </Form>
       </Modal>
     </div>

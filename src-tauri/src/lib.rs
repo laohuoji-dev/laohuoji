@@ -22,6 +22,9 @@ struct Product {
     cost_price: f64,
     sell_price: f64,
     stock: i32,
+    barcode: Option<String>,
+    status: Option<String>,
+    min_stock: Option<i32>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -137,6 +140,9 @@ async fn add_product(product: Product, state: State<'_, AppState>) -> Result<i64
         product.cost_price,
         product.sell_price,
         product.stock,
+        product.barcode.as_deref(),
+        product.status.as_deref().unwrap_or("ACTIVE"),
+        product.min_stock.unwrap_or(0),
     )
 }
 
@@ -162,6 +168,9 @@ async fn update_product(
         product.cost_price,
         product.sell_price,
         product.stock,
+        product.barcode.as_deref(),
+        product.status.as_deref().unwrap_or("ACTIVE"),
+        product.min_stock.unwrap_or(0),
     )
 }
 
@@ -414,10 +423,13 @@ async fn restore_database(
     state: State<'_, AppState>,
 ) -> Result<(), AppError> {
     let db_path = Database::get_db_path(&app_handle)?;
-    
+
     // 断开现有数据库连接以允许文件替换
     {
-        let mut db_guard = state.db.lock().map_err(|e| AppError::new("LOCK_ERROR", e.to_string()))?;
+        let mut db_guard = state
+            .db
+            .lock()
+            .map_err(|e| AppError::new("LOCK_ERROR", e.to_string()))?;
         *db_guard = None;
     }
 
@@ -427,7 +439,10 @@ async fn restore_database(
 
     // 重新建立连接
     let new_db = Database::new(&app_handle)?;
-    let mut db_guard = state.db.lock().map_err(|e| AppError::new("LOCK_ERROR", e.to_string()))?;
+    let mut db_guard = state
+        .db
+        .lock()
+        .map_err(|e| AppError::new("LOCK_ERROR", e.to_string()))?;
     *db_guard = Some(new_db);
 
     Ok(())
@@ -436,6 +451,7 @@ async fn restore_database(
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .manage(AppState {
