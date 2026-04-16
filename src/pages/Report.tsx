@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Card, Row, Col, Statistic, Button, Spin, message } from 'antd';
 import { DollarOutlined, ShoppingCartOutlined, RiseOutlined, FileTextOutlined, DownloadOutlined } from '@ant-design/icons';
 import { invoke } from '@tauri-apps/api/core';
+import { getTauriErrorMessage } from '../utils/tauriError';
 
 interface ReportData {
   sales: number;
@@ -38,7 +39,7 @@ const Report = () => {
       setReport(data);
     } catch (error) {
       console.error('Failed to load report:', error);
-      message.error('加载报告失败');
+      message.error(getTauriErrorMessage(error) || '加载报告失败');
     } finally {
       setLoading(false);
     }

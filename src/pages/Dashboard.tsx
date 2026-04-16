@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react';
-import { Card, Row, Col, Statistic, Button, List, Tag } from 'antd';
+import { Card, Row, Col, Statistic, Button, List, Tag, message } from 'antd';
 import { AppstoreOutlined, DollarOutlined, ShoppingCartOutlined, RiseOutlined, ReloadOutlined, WarningOutlined, ClockCircleOutlined } from '@ant-design/icons';
 import { invoke } from '@tauri-apps/api/core';
 import SalesTrend from '../components/SalesTrend';
+import { getTauriErrorMessage } from '../utils/tauriError';
 
 interface Statistics {
   product_count: number;
@@ -54,6 +55,7 @@ const Dashboard = () => {
       setStats(data);
     } catch (error) {
       console.error('Failed to load statistics:', error);
+      message.error(getTauriErrorMessage(error) || '加载统计数据失败');
     } finally {
       setLoading(false);
     }
@@ -65,6 +67,7 @@ const Dashboard = () => {
       setLowStockProducts(data);
     } catch (error) {
       console.error('Failed to load low stock products:', error);
+      message.error(getTauriErrorMessage(error) || '加载库存预警失败');
     }
   };
 
@@ -74,6 +77,7 @@ const Dashboard = () => {
       setSlowMovingProducts(data);
     } catch (error) {
       console.error('Failed to load slow moving products:', error);
+      message.error(getTauriErrorMessage(error) || '加载滞销商品失败');
     }
   };
 

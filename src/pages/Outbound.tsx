@@ -4,7 +4,7 @@ import { SendOutlined, DownloadOutlined } from '@ant-design/icons';
 import { invoke } from '@tauri-apps/api/core';
 import type { Dayjs } from 'dayjs';
 import * as XLSX from 'xlsx';
-import { getTauriErrorMessage } from '../utils/tauriError';
+import { getTauriAppError, getTauriErrorMessage } from '../utils/tauriError';
 
 interface Product {
   id: number;
@@ -54,8 +54,8 @@ const Outbound = () => {
   const loadRecords = async (startDate?: string, endDate?: string) => {
     try {
       const data = await invoke<OutboundRecord[]>('get_outbound_records', {
-        startDate: startDate || null,
-        endDate: endDate || null,
+        start_date: startDate || null,
+        end_date: endDate || null,
       });
       setRecords(data);
     } catch (error) {
@@ -88,7 +88,12 @@ const Outbound = () => {
       loadProducts();
       loadRecords();
     } catch (error: any) {
-      message.error(getTauriErrorMessage(error) || '出库失败');
+      const appError = getTauriAppError(error);
+      if (appError?.code === 'STOCK_INSUFFICIENT') {
+        message.error(appError.message);
+      } else {
+        message.error(getTauriErrorMessage(error) || '出库失败');
+      }
       console.error(error);
     } finally {
       setSubmitting(false);

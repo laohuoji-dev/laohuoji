@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { Form, Input, Button, Card, message } from 'antd';
 import { LockOutlined } from '@ant-design/icons';
 import { invoke } from '@tauri-apps/api/core';
+import { getTauriErrorMessage } from '../utils/tauriError';
 
 interface LoginProps {
   onLogin: () => void;
@@ -45,7 +46,7 @@ const Login = ({ onLogin }: LoginProps) => {
         }
       }
     } catch (error) {
-      message.error('操作失败');
+      message.error(getTauriErrorMessage(error) || '操作失败');
       console.error(error);
     } finally {
       setLoading(false);

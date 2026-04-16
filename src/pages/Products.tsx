@@ -3,6 +3,7 @@ import { Table, Button, Modal, Form, Input, InputNumber, Space, message, Popconf
 import { PlusOutlined, EditOutlined, DeleteOutlined, SearchOutlined } from '@ant-design/icons';
 import { invoke } from '@tauri-apps/api/core';
 import { getFirstLetter, toPinyin } from '../utils/pinyin';
+import { getTauriErrorMessage } from '../utils/tauriError';
 
 interface Product {
   id: number;
@@ -66,7 +67,7 @@ const Products = () => {
       const data = await invoke<Product[]>('get_products');
       setProducts(data);
     } catch (error) {
-      message.error('加载商品列表失败');
+      message.error(getTauriErrorMessage(error) || '加载商品列表失败');
       console.error(error);
     } finally {
       setLoading(false);
@@ -125,7 +126,7 @@ const Products = () => {
       message.success('删除成功');
       loadProducts();
     } catch (error) {
-      message.error('删除失败');
+      message.error(getTauriErrorMessage(error) || '删除失败');
       console.error(error);
     }
   };
@@ -145,7 +146,7 @@ const Products = () => {
       setModalVisible(false);
       loadProducts();
     } catch (error) {
-      message.error(editingProduct ? '更新失败' : '添加失败');
+      message.error(getTauriErrorMessage(error) || (editingProduct ? '更新失败' : '添加失败'));
       console.error(error);
     }
   };

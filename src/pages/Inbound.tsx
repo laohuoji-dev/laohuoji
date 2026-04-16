@@ -4,6 +4,7 @@ import { ShoppingCartOutlined, DownloadOutlined } from '@ant-design/icons';
 import { invoke } from '@tauri-apps/api/core';
 import type { Dayjs } from 'dayjs';
 import * as XLSX from 'xlsx';
+import { getTauriErrorMessage } from '../utils/tauriError';
 
 interface Product {
   id: number;
@@ -52,8 +53,8 @@ const Inbound = () => {
   const loadRecords = async (startDate?: string, endDate?: string) => {
     try {
       const data = await invoke<InboundRecord[]>('get_inbound_records', {
-        startDate: startDate || null,
-        endDate: endDate || null,
+        start_date: startDate || null,
+        end_date: endDate || null,
       });
       setRecords(data);
     } catch (error) {
@@ -86,7 +87,7 @@ const Inbound = () => {
       loadProducts();
       loadRecords();
     } catch (error) {
-      message.error('入库失败');
+      message.error(getTauriErrorMessage(error) || '入库失败');
       console.error(error);
     } finally {
       setSubmitting(false);

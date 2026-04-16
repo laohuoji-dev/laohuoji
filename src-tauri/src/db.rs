@@ -22,8 +22,28 @@ impl Database {
         conn.busy_timeout(Duration::from_secs(5))?;
 
         let db = Database { conn };
-        db.init_tables()?;
+        db.migrate()?;
         Ok(db)
+    }
+
+    fn migrate(&self) -> Result<(), AppError> {
+        let user_version: i32 = self
+            .conn
+            .query_row("PRAGMA user_version", [], |row| row.get(0))?;
+
+        match user_version {
+            0 => {
+                self.init_tables()?;
+                self.ensure_indexes()?;
+                self.conn.execute_batch("PRAGMA user_version = 1;")?;
+                Ok(())
+            }
+            1 => self.ensure_indexes(),
+            other => Err(AppError::new(
+                "DB_VERSION_UNSUPPORTED",
+                format!("数据库版本不支持: {}", other),
+            )),
+        }
     }
 
     fn init_tables(&self) -> Result<(), AppError> {
@@ -78,6 +98,17 @@ impl Database {
             [],
         )?;
 
+        Ok(())
+    }
+
+    fn ensure_indexes(&self) -> Result<(), AppError> {
+        self.conn.execute_batch(
+            "
+            CREATE INDEX IF NOT EXISTS idx_products_name ON products(name);
+            CREATE INDEX IF NOT EXISTS idx_inbound_product_created_at ON inbound_orders(product_id, created_at);
+            CREATE INDEX IF NOT EXISTS idx_outbound_product_created_at ON outbound_orders(product_id, created_at);
+            ",
+        )?;
         Ok(())
     }
 
