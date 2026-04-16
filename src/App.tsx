@@ -8,7 +8,8 @@ import {
   LogoutOutlined,
   LockOutlined,
   FileTextOutlined,
-  UnorderedListOutlined,
+  HistoryOutlined,
+  SettingOutlined,
 } from '@ant-design/icons';
 import { invoke } from '@tauri-apps/api/core';
 import Login from './pages/Login';
@@ -19,6 +20,7 @@ import Outbound from './pages/Outbound';
 import ChangePassword from './pages/ChangePassword';
 import Report from './pages/Report';
 import InventoryLogs from './pages/InventoryLogs';
+import Settings from './pages/Settings';
 import './App.css';
 
 const { Header, Content, Sider } = Layout;
@@ -54,8 +56,8 @@ function App() {
     { key: 'products', icon: <ShoppingOutlined />, label: '商品管理' },
     { key: 'inbound', icon: <ShoppingCartOutlined />, label: '入库管理' },
     { key: 'outbound', icon: <SendOutlined />, label: '出库管理' },
+    { key: 'inventory-logs', icon: <HistoryOutlined />, label: '库存流水' },
     { key: 'report', icon: <FileTextOutlined />, label: '经营报告' },
-    { key: 'inventory-logs', icon: <UnorderedListOutlined />, label: '库存流水' },
   ];
 
   const renderContent = () => {
@@ -74,6 +76,8 @@ function App() {
         return <InventoryLogs />;
       case 'change-password':
         return <ChangePassword />;
+      case 'settings':
+        return <Settings />;
       default:
         return <Dashboard />;
     }
@@ -127,6 +131,12 @@ function App() {
           style={{ position: 'absolute', bottom: 0, width: '100%' }}
           items={[
             {
+              key: 'settings',
+              icon: <SettingOutlined />,
+              label: '系统设置',
+              onClick: () => setCurrentPage('settings'),
+            },
+            {
               key: 'change-password',
               icon: <LockOutlined />,
               label: '修改密码',
@@ -144,7 +154,9 @@ function App() {
       <Layout style={{ marginLeft: 200 }}>
         <Header style={{ padding: 0, background: colorBgContainer }}>
           <div style={{ padding: '0 24px', fontSize: 18, fontWeight: 'bold' }}>
-            {menuItems.find((item) => item.key === currentPage)?.label || (currentPage === 'change-password' ? '修改密码' : '')}
+            {menuItems.find((item) => item.key === currentPage)?.label || 
+             (currentPage === 'change-password' ? '修改密码' : 
+              currentPage === 'settings' ? '系统设置' : '')}
           </div>
         </Header>
         <Content style={{ margin: '24px 16px 0' }}>

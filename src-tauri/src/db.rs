@@ -9,14 +9,7 @@ pub struct Database {
 
 impl Database {
     pub fn new(app_handle: &AppHandle) -> Result<Self, AppError> {
-        let app_data_dir = app_handle
-            .path()
-            .app_data_dir()
-            .map_err(|e| AppError::new("PATH_ERROR", e.to_string()))?;
-
-        std::fs::create_dir_all(&app_data_dir)?;
-
-        let db_path = app_data_dir.join("inventory.db");
+        let db_path = Self::get_db_path(app_handle)?;
         let conn = Connection::open(db_path)?;
         conn.execute_batch("PRAGMA foreign_keys = ON;")?;
         conn.busy_timeout(Duration::from_secs(5))?;
@@ -24,6 +17,16 @@ impl Database {
         let db = Database { conn };
         db.migrate()?;
         Ok(db)
+    }
+
+    pub fn get_db_path(app_handle: &AppHandle) -> Result<std::path::PathBuf, AppError> {
+        let app_data_dir = app_handle
+            .path()
+            .app_data_dir()
+            .map_err(|e| AppError::new("PATH_ERROR", e.to_string()))?;
+
+        std::fs::create_dir_all(&app_data_dir)?;
+        Ok(app_data_dir.join("inventory.db"))
     }
 
     fn migrate(&self) -> Result<(), AppError> {
@@ -358,6 +361,25 @@ impl Database {
     }
 
     pub fn delete_product(&mut self, id: i64) -> Result<(), AppError> {
+        let has_history: bool = self.conn.query_row(
+            "SELECT EXISTS(
+                SELECT 1 FROM inbound_orders WHERE product_id = ?
+                UNION ALL
+                SELECT 1 FROM outbound_orders WHERE product_id = ?
+                UNION ALL
+                SELECT 1 FROM inventory_logs WHERE product_id = ?
+            )",
+            params![id, id, id],
+            |row| row.get(0),
+        )?;
+
+        if has_history {
+            return Err(AppError::new(
+                "PRODUCT_HAS_HISTORY",
+                "该商品存在库存或单据流水，禁止删除。请将其库存归零或调整名称加以区分。",
+            ));
+        }
+
         self.conn
             .execute("DELETE FROM products WHERE id = ?", params![id])?;
         Ok(())

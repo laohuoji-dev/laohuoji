@@ -3,7 +3,7 @@ import { Table, Button, Modal, Form, Input, InputNumber, Space, message, Popconf
 import { PlusOutlined, EditOutlined, DeleteOutlined, SearchOutlined } from '@ant-design/icons';
 import { invoke } from '@tauri-apps/api/core';
 import { getFirstLetter, toPinyin } from '../utils/pinyin';
-import { getTauriErrorMessage } from '../utils/tauriError';
+import { getTauriAppError, getTauriErrorMessage } from '../utils/tauriError';
 import { getLowStockThreshold } from '../utils/settings';
 
 interface Product {
@@ -135,10 +135,18 @@ const Products = () => {
   const handleDelete = async (id: number) => {
     try {
       await invoke('delete_product', { id });
-      message.success('删除成功');
+      message.success('商品已删除');
       loadProducts();
-    } catch (error) {
-      message.error(getTauriErrorMessage(error) || '删除失败');
+    } catch (error: any) {
+      const errObj = getTauriAppError(error);
+      if (errObj && errObj.code === 'PRODUCT_HAS_HISTORY') {
+        Modal.warning({
+          title: '无法删除商品',
+          content: '该商品存在入库、出库或修改流水，无法直接删除以保证数据完整性。建议将其库存清零或修改名称进行归档。',
+        });
+      } else {
+        message.error(getTauriErrorMessage(error) || '删除商品失败');
+      }
       console.error(error);
     }
   };

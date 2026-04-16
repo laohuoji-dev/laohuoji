@@ -1,10 +1,10 @@
 import { useEffect, useState } from 'react';
-import { Card, Row, Col, Statistic, Button, List, Tag, message, Space, InputNumber } from 'antd';
+import { Card, Row, Col, Statistic, Button, List, Tag, message, Space } from 'antd';
 import { AppstoreOutlined, DollarOutlined, ShoppingCartOutlined, RiseOutlined, ReloadOutlined, WarningOutlined, ClockCircleOutlined } from '@ant-design/icons';
 import { invoke } from '@tauri-apps/api/core';
 import SalesTrend from '../components/SalesTrend';
 import { getTauriErrorMessage } from '../utils/tauriError';
-import { getLowStockThreshold, setLowStockThreshold } from '../utils/settings';
+import { getLowStockThreshold } from '../utils/settings';
 
 interface Statistics {
   product_count: number;
@@ -43,7 +43,6 @@ const Dashboard = () => {
   const [slowMovingProducts, setSlowMovingProducts] = useState<SlowMovingProduct[]>([]);
   const [loading, setLoading] = useState(true);
   const [lowStockThreshold, setLowStockThresholdState] = useState<number>(10);
-  const [savingThreshold, setSavingThreshold] = useState(false);
 
   useEffect(() => {
     loadStatistics();
@@ -99,30 +98,6 @@ const Dashboard = () => {
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
         <h2>数据概览</h2>
         <Space>
-          <span style={{ color: '#666' }}>低库存阈值</span>
-          <InputNumber
-            min={1}
-            value={lowStockThreshold}
-            onChange={(v) => setLowStockThresholdState(Number(v || 1))}
-          />
-          <Button
-            type="primary"
-            loading={savingThreshold}
-            onClick={async () => {
-              setSavingThreshold(true);
-              try {
-                await setLowStockThreshold(lowStockThreshold);
-                message.success('阈值已保存');
-                loadLowStockProducts();
-              } catch (error) {
-                message.error(getTauriErrorMessage(error) || '保存阈值失败');
-              } finally {
-                setSavingThreshold(false);
-              }
-            }}
-          >
-            保存
-          </Button>
           <Button
             icon={<ReloadOutlined />}
             onClick={() => {
@@ -199,7 +174,7 @@ const Dashboard = () => {
           title={
             <span>
               <WarningOutlined style={{ color: '#cf1322', marginRight: 8 }} />
-              库存预警
+              库存预警 (低于 {lowStockThreshold})
               <Tag color="red" style={{ marginLeft: 8 }}>{lowStockProducts.length} 个商品</Tag>
             </span>
           }

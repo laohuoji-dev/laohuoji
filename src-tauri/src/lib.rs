@@ -396,9 +396,47 @@ async fn get_inventory_logs(
     db.get_inventory_logs(product_id, start_date.as_deref(), end_date.as_deref())
 }
 
+#[tauri::command]
+async fn backup_database(
+    target_path: String,
+    app_handle: tauri::AppHandle,
+) -> Result<(), AppError> {
+    let db_path = Database::get_db_path(&app_handle)?;
+    std::fs::copy(&db_path, &target_path)
+        .map_err(|e| AppError::new("BACKUP_ERROR", format!("备份失败: {}", e)))?;
+    Ok(())
+}
+
+#[tauri::command]
+async fn restore_database(
+    source_path: String,
+    app_handle: tauri::AppHandle,
+    state: State<'_, AppState>,
+) -> Result<(), AppError> {
+    let db_path = Database::get_db_path(&app_handle)?;
+    
+    // 断开现有数据库连接以允许文件替换
+    {
+        let mut db_guard = state.db.lock().map_err(|e| AppError::new("LOCK_ERROR", e.to_string()))?;
+        *db_guard = None;
+    }
+
+    // 执行覆盖
+    std::fs::copy(&source_path, &db_path)
+        .map_err(|e| AppError::new("RESTORE_ERROR", format!("恢复失败: {}", e)))?;
+
+    // 重新建立连接
+    let new_db = Database::new(&app_handle)?;
+    let mut db_guard = state.db.lock().map_err(|e| AppError::new("LOCK_ERROR", e.to_string()))?;
+    *db_guard = Some(new_db);
+
+    Ok(())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .manage(AppState {
             db: Mutex::new(None),
@@ -426,6 +464,8 @@ pub fn run() {
             get_inbound_records,
             get_outbound_records,
             get_inventory_logs,
+            backup_database,
+            restore_database,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
