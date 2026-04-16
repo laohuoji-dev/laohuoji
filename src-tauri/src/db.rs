@@ -197,11 +197,11 @@ impl Database {
             CREATE TABLE IF NOT EXISTS inventory_logs (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 product_id INTEGER NOT NULL,
-                change_type TEXT NOT NULL, -- 'INBOUND', 'OUTBOUND', 'MANUAL_ADJUST', 'CREATE'
-                quantity INTEGER NOT NULL, -- 变动数量，正数或负数
-                previous_stock INTEGER NOT NULL, -- 变动前库存
-                current_stock INTEGER NOT NULL, -- 变动后库存
-                reference_id INTEGER, -- 关联的单据ID (入库单或出库单)
+                change_type TEXT NOT NULL,
+                quantity INTEGER NOT NULL,
+                previous_stock INTEGER NOT NULL,
+                current_stock INTEGER NOT NULL,
+                reference_id INTEGER,
                 created_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
                 FOREIGN KEY (product_id) REFERENCES products(id)
             );
@@ -298,7 +298,6 @@ impl Database {
 
         let product_id = tx.last_insert_rowid();
 
-        // 如果初始库存大于0，写入建档流水
         if stock > 0 {
             tx.execute(
                 "INSERT INTO inventory_logs (product_id, change_type, quantity, previous_stock, current_stock) VALUES (?, 'CREATE', ?, 0, ?)",
@@ -852,7 +851,6 @@ impl Database {
         Ok(records)
     }
 
-    // 获取库存流水
     pub fn get_inventory_logs(
         &self,
         product_id: Option<i64>,

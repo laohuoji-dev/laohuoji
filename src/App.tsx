@@ -8,6 +8,7 @@ import {
   LogoutOutlined,
   LockOutlined,
   FileTextOutlined,
+  UnorderedListOutlined,
 } from '@ant-design/icons';
 import { invoke } from '@tauri-apps/api/core';
 import Login from './pages/Login';
@@ -17,6 +18,7 @@ import Inbound from './pages/Inbound';
 import Outbound from './pages/Outbound';
 import ChangePassword from './pages/ChangePassword';
 import Report from './pages/Report';
+import InventoryLogs from './pages/InventoryLogs';
 import './App.css';
 
 const { Header, Content, Sider } = Layout;
@@ -53,6 +55,7 @@ function App() {
     { key: 'inbound', icon: <ShoppingCartOutlined />, label: '入库管理' },
     { key: 'outbound', icon: <SendOutlined />, label: '出库管理' },
     { key: 'report', icon: <FileTextOutlined />, label: '经营报告' },
+    { key: 'inventory-logs', icon: <UnorderedListOutlined />, label: '库存流水' },
   ];
 
   const renderContent = () => {
@@ -67,6 +70,8 @@ function App() {
         return <Outbound />;
       case 'report':
         return <Report />;
+      case 'inventory-logs':
+        return <InventoryLogs />;
       case 'change-password':
         return <ChangePassword />;
       default:
