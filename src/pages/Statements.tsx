@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Button, Card, DatePicker, message, Select, Space, Statistic, Table, Tabs, Typography } from 'antd';
+import { Button, Card, Col, DatePicker, Divider, message, Row, Select, Space, Statistic, Table, Tabs, Typography } from 'antd';
 import { DownloadOutlined, PrinterOutlined, ReloadOutlined } from '@ant-design/icons';
 import { invoke } from '@tauri-apps/api/core';
 import type { Dayjs } from 'dayjs';
@@ -7,8 +7,9 @@ import { save } from '@tauri-apps/plugin-dialog';
 import { writeFile } from '@tauri-apps/plugin-fs';
 import * as XLSX from 'xlsx';
 import { getTauriErrorMessage } from '../utils/tauriError';
+import { getCompanyInfo, CompanyInfo } from '../utils/settings';
 
-const { Title } = Typography;
+const { Title, Text } = Typography;
 
 interface Partner {
   id: number;
@@ -66,6 +67,7 @@ interface SupplierStatement {
 const Statements = () => {
   const [customers, setCustomers] = useState<Partner[]>([]);
   const [suppliers, setSuppliers] = useState<Partner[]>([]);
+  const [companyInfo, setCompanyInfo] = useState<CompanyInfo>({ name: '', phone: '', address: '' });
 
   const [tab, setTab] = useState<'customer' | 'supplier'>('customer');
   const [partnerName, setPartnerName] = useState<string | undefined>(undefined);
@@ -77,7 +79,17 @@ const Statements = () => {
 
   useEffect(() => {
     loadPartners();
+    loadCompanyInfo();
   }, []);
+
+  const loadCompanyInfo = async () => {
+    try {
+      const info = await getCompanyInfo();
+      setCompanyInfo(info);
+    } catch (e) {
+      console.error(e);
+    }
+  };
 
   const loadPartners = async () => {
     try {
@@ -206,6 +218,28 @@ const Statements = () => {
 
   return (
     <div className="print-root">
+      <div className="print-header" style={{ display: 'none', marginBottom: 24 }}>
+        <Title level={3} style={{ textAlign: 'center', marginBottom: 4 }}>
+          {companyInfo.name || '对账单'}
+        </Title>
+        <div style={{ textAlign: 'center', marginBottom: 16 }}>
+          <Text type="secondary">{tab === 'customer' ? '客户销售对账单' : '供应商采购对账单'}</Text>
+        </div>
+        
+        <Row style={{ marginBottom: 16 }}>
+          <Col span={12}>
+            <Text strong>{tab === 'customer' ? '客户名称：' : '供应商名称：'}</Text>
+            <Text>{partnerName || '全部'}</Text>
+          </Col>
+          <Col span={12} style={{ textAlign: 'right' }}>
+            <Text strong>对账期间：</Text>
+            <Text>
+              {dateRange ? `${dateRange[0]?.format('YYYY-MM-DD') ?? ''} 至 ${dateRange[1]?.format('YYYY-MM-DD') ?? ''}` : '全部'}
+            </Text>
+          </Col>
+        </Row>
+      </div>
+
       <div className="no-print">
         <Title level={2} style={{ marginBottom: 16 }}>
           对账与统计
@@ -254,7 +288,7 @@ const Statements = () => {
       </Card>
 
       {currentStatement && (
-        <Card style={{ marginBottom: 16 }}>
+        <Card style={{ marginBottom: 16 }} className="statement-summary">
           <Space wrap size="large">
             {tab === 'customer' ? (
               <>
@@ -276,13 +310,40 @@ const Statements = () => {
       )}
 
       <Table
+        className="print-table"
         rowKey="product_id"
         loading={loading}
         dataSource={(currentStatement?.items as any) ?? []}
         columns={(tab === 'customer' ? customerColumns : supplierColumns) as any}
-        pagination={{ pageSize: 20 }}
-        scroll={{ x: 800 }}
+        pagination={false}
+        bordered
       />
+
+      <div className="print-footer" style={{ display: 'none', marginTop: 40 }}>
+        <Row gutter={24}>
+          <Col span={8}>
+            <Text strong>制单人：</Text>
+            <div style={{ borderBottom: '1px solid #000', width: '120px', display: 'inline-block' }}></div>
+          </Col>
+          <Col span={8}>
+            <Text strong>{tab === 'customer' ? '客户确认签字/盖章：' : '供应商确认签字/盖章：'}</Text>
+            <div style={{ borderBottom: '1px solid #000', width: '120px', display: 'inline-block' }}></div>
+          </Col>
+          <Col span={8}>
+            <Text strong>打印日期：</Text>
+            <Text>{new Date().toLocaleString()}</Text>
+          </Col>
+        </Row>
+        {(companyInfo.phone || companyInfo.address) && (
+          <>
+            <Divider style={{ margin: '16px 0' }} />
+            <div style={{ textAlign: 'center', fontSize: '12px' }}>
+              {companyInfo.phone && <Text type="secondary" style={{ marginRight: 16 }}>电话：{companyInfo.phone}</Text>}
+              {companyInfo.address && <Text type="secondary">地址：{companyInfo.address}</Text>}
+            </div>
+          </>
+        )}
+      </div>
     </div>
   );
 };

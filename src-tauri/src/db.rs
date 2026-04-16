@@ -352,6 +352,66 @@ impl Database {
         Ok(())
     }
 
+    pub fn get_company_info(&self) -> Result<serde_json::Value, AppError> {
+        use rusqlite::OptionalExtension;
+
+        let name: Option<String> = self
+            .conn
+            .query_row(
+                "SELECT value FROM app_settings WHERE key = 'company_name'",
+                [],
+                |row| row.get(0),
+            )
+            .optional()?;
+
+        let phone: Option<String> = self
+            .conn
+            .query_row(
+                "SELECT value FROM app_settings WHERE key = 'company_phone'",
+                [],
+                |row| row.get(0),
+            )
+            .optional()?;
+
+        let address: Option<String> = self
+            .conn
+            .query_row(
+                "SELECT value FROM app_settings WHERE key = 'company_address'",
+                [],
+                |row| row.get(0),
+            )
+            .optional()?;
+
+        Ok(serde_json::json!({
+            "name": name.unwrap_or_default(),
+            "phone": phone.unwrap_or_default(),
+            "address": address.unwrap_or_default(),
+        }))
+    }
+
+    pub fn set_company_info(
+        &mut self,
+        name: &str,
+        phone: &str,
+        address: &str,
+    ) -> Result<(), AppError> {
+        let tx = self.conn.transaction()?;
+        tx.execute(
+            "INSERT OR REPLACE INTO app_settings (key, value) VALUES ('company_name', ?)",
+            params![name],
+        )?;
+        tx.execute(
+            "INSERT OR REPLACE INTO app_settings (key, value) VALUES ('company_phone', ?)",
+            params![phone],
+        )?;
+        tx.execute(
+            "INSERT OR REPLACE INTO app_settings (key, value) VALUES ('company_address', ?)",
+            params![address],
+        )?;
+        tx.commit()?;
+        Ok(())
+    }
+
     pub fn has_password(&self) -> Result<bool, AppError> {
         let mut stmt = self
             .conn
@@ -751,7 +811,10 @@ impl Database {
             let cost_price = p["cost_price"].as_f64().unwrap_or(0.0);
             let sell_price = p["sell_price"].as_f64().unwrap_or(0.0);
             let stock = p["stock"].as_i64().unwrap_or(0) as i32;
-            let barcode = p["barcode"].as_str().map(|s| s.trim()).filter(|s| !s.is_empty());
+            let barcode = p["barcode"]
+                .as_str()
+                .map(|s| s.trim())
+                .filter(|s| !s.is_empty());
             let status = p["status"].as_str().unwrap_or("ACTIVE");
             let min_stock = p["min_stock"].as_i64().unwrap_or(0) as i32;
 
@@ -761,7 +824,10 @@ impl Database {
                     params![category],
                 )?;
             }
-            tx.execute("INSERT OR IGNORE INTO units (name) VALUES (?)", params![unit])?;
+            tx.execute(
+                "INSERT OR IGNORE INTO units (name) VALUES (?)",
+                params![unit],
+            )?;
 
             tx.execute(
                 "INSERT INTO products (name, category, unit, cost_price, sell_price, stock, barcode, status, min_stock) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
@@ -1198,7 +1264,9 @@ impl Database {
         };
 
         let (date_filter, date_params): (&str, Vec<&str>) = match (start_date, end_date) {
-            (Some(start), Some(end)) => (" AND date(o.created_at) BETWEEN ? AND ? ", vec![start, end]),
+            (Some(start), Some(end)) => {
+                (" AND date(o.created_at) BETWEEN ? AND ? ", vec![start, end])
+            }
             _ => ("", vec![]),
         };
 
@@ -1261,20 +1329,17 @@ impl Database {
         );
 
         let mut stmt = self.conn.prepare(&items_sql)?;
-        let rows = stmt.query_map(
-            rusqlite::params_from_iter(items_params.iter()),
-            |row| {
-                Ok(serde_json::json!({
-                    "product_id": row.get::<_, i64>(0)?,
-                    "product_name": row.get::<_, String>(1)?,
-                    "unit": row.get::<_, String>(2)?,
-                    "quantity": row.get::<_, i64>(3)?,
-                    "sales_total": row.get::<_, f64>(4)?,
-                    "cost_total": row.get::<_, f64>(5)?,
-                    "profit_total": row.get::<_, f64>(6)?,
-                }))
-            },
-        )?;
+        let rows = stmt.query_map(rusqlite::params_from_iter(items_params.iter()), |row| {
+            Ok(serde_json::json!({
+                "product_id": row.get::<_, i64>(0)?,
+                "product_name": row.get::<_, String>(1)?,
+                "unit": row.get::<_, String>(2)?,
+                "quantity": row.get::<_, i64>(3)?,
+                "sales_total": row.get::<_, f64>(4)?,
+                "cost_total": row.get::<_, f64>(5)?,
+                "profit_total": row.get::<_, f64>(6)?,
+            }))
+        })?;
         let mut items = Vec::new();
         for row in rows {
             items.push(row?);
@@ -1302,7 +1367,9 @@ impl Database {
         };
 
         let (date_filter, date_params): (&str, Vec<&str>) = match (start_date, end_date) {
-            (Some(start), Some(end)) => (" AND date(o.created_at) BETWEEN ? AND ? ", vec![start, end]),
+            (Some(start), Some(end)) => {
+                (" AND date(o.created_at) BETWEEN ? AND ? ", vec![start, end])
+            }
             _ => ("", vec![]),
         };
 
@@ -1358,18 +1425,15 @@ impl Database {
         );
 
         let mut stmt = self.conn.prepare(&items_sql)?;
-        let rows = stmt.query_map(
-            rusqlite::params_from_iter(items_params.iter()),
-            |row| {
-                Ok(serde_json::json!({
-                    "product_id": row.get::<_, i64>(0)?,
-                    "product_name": row.get::<_, String>(1)?,
-                    "unit": row.get::<_, String>(2)?,
-                    "quantity": row.get::<_, i64>(3)?,
-                    "purchase_total": row.get::<_, f64>(4)?,
-                }))
-            },
-        )?;
+        let rows = stmt.query_map(rusqlite::params_from_iter(items_params.iter()), |row| {
+            Ok(serde_json::json!({
+                "product_id": row.get::<_, i64>(0)?,
+                "product_name": row.get::<_, String>(1)?,
+                "unit": row.get::<_, String>(2)?,
+                "quantity": row.get::<_, i64>(3)?,
+                "purchase_total": row.get::<_, f64>(4)?,
+            }))
+        })?;
         let mut items = Vec::new();
         for row in rows {
             items.push(row?);

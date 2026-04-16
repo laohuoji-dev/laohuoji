@@ -530,7 +530,11 @@ async fn get_customer_statement(
     let db = db_guard
         .as_ref()
         .ok_or_else(|| AppError::new("DB_NOT_INIT", "数据库未初始化"))?;
-    db.get_customer_statement(customer.as_deref(), start_date.as_deref(), end_date.as_deref())
+    db.get_customer_statement(
+        customer.as_deref(),
+        start_date.as_deref(),
+        end_date.as_deref(),
+    )
 }
 
 #[tauri::command]
@@ -547,7 +551,11 @@ async fn get_supplier_statement(
     let db = db_guard
         .as_ref()
         .ok_or_else(|| AppError::new("DB_NOT_INIT", "数据库未初始化"))?;
-    db.get_supplier_statement(supplier.as_deref(), start_date.as_deref(), end_date.as_deref())
+    db.get_supplier_statement(
+        supplier.as_deref(),
+        start_date.as_deref(),
+        end_date.as_deref(),
+    )
 }
 
 // 库存预警命令
@@ -591,6 +599,35 @@ async fn set_low_stock_threshold(
         .as_mut()
         .ok_or_else(|| AppError::new("DB_NOT_INIT", "数据库未初始化"))?;
     db.set_low_stock_threshold(threshold)
+}
+
+#[tauri::command]
+async fn get_company_info(state: State<'_, AppState>) -> Result<serde_json::Value, AppError> {
+    let db_guard = state
+        .db
+        .lock()
+        .map_err(|e| AppError::new("LOCK_ERROR", e.to_string()))?;
+    let db = db_guard
+        .as_ref()
+        .ok_or_else(|| AppError::new("DB_NOT_INIT", "数据库未初始化"))?;
+    db.get_company_info()
+}
+
+#[tauri::command]
+async fn set_company_info(
+    name: String,
+    phone: String,
+    address: String,
+    state: State<'_, AppState>,
+) -> Result<(), AppError> {
+    let mut db_guard = state
+        .db
+        .lock()
+        .map_err(|e| AppError::new("LOCK_ERROR", e.to_string()))?;
+    let db = db_guard
+        .as_mut()
+        .ok_or_else(|| AppError::new("DB_NOT_INIT", "数据库未初始化"))?;
+    db.set_company_info(&name, &phone, &address)
 }
 
 // 记录查询命令
@@ -720,6 +757,8 @@ pub fn run() {
             get_low_stock_products,
             get_low_stock_threshold,
             set_low_stock_threshold,
+            get_company_info,
+            set_company_info,
             get_inbound_records,
             get_outbound_records,
             get_inventory_logs,

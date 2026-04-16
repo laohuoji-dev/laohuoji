@@ -1,12 +1,13 @@
 import { useEffect, useState } from 'react';
 import { Card, Form, InputNumber, Button, message, Space, Typography, Alert, Modal, Input, List, Popconfirm, Tabs } from 'antd';
-import { SaveOutlined, DownloadOutlined, UploadOutlined, DatabaseOutlined, SettingOutlined, DeleteOutlined, PlusOutlined, TagsOutlined, ExperimentOutlined } from '@ant-design/icons';
+import { SaveOutlined, DownloadOutlined, UploadOutlined, DatabaseOutlined, SettingOutlined, DeleteOutlined, PlusOutlined, TagsOutlined, ExperimentOutlined, ShopOutlined } from '@ant-design/icons';
 import { invoke } from '@tauri-apps/api/core';
 import { save, open } from '@tauri-apps/plugin-dialog';
 import { 
   getLowStockThreshold, setLowStockThreshold as saveLowStockThreshold,
   getCategories, addCategory, deleteCategory, Category,
-  getUnits, addUnit, deleteUnit, Unit
+  getUnits, addUnit, deleteUnit, Unit,
+  getCompanyInfo, setCompanyInfo as saveCompanyInfo, CompanyInfo
 } from '../utils/settings';
 import { getTauriErrorMessage } from '../utils/tauriError';
 
@@ -14,8 +15,10 @@ const { Title, Text } = Typography;
 
 const Settings = () => {
   const [form] = Form.useForm();
+  const [companyForm] = Form.useForm();
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [companySaving, setCompanySaving] = useState(false);
   const [categories, setCategories] = useState<Category[]>([]);
   const [units, setUnits] = useState<Unit[]>([]);
   const [newCategoryName, setNewCategoryName] = useState('');
@@ -83,8 +86,12 @@ const Settings = () => {
   const loadSettings = async () => {
     setLoading(true);
     try {
-      const threshold = await getLowStockThreshold();
+      const [threshold, companyInfo] = await Promise.all([
+        getLowStockThreshold(),
+        getCompanyInfo()
+      ]);
       form.setFieldsValue({ lowStockThreshold: threshold });
+      companyForm.setFieldsValue(companyInfo);
     } catch (error) {
       message.error(getTauriErrorMessage(error) || '加载设置失败');
     } finally {
@@ -101,6 +108,18 @@ const Settings = () => {
       message.error(getTauriErrorMessage(error) || '保存失败');
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handleSaveCompanyInfo = async (values: CompanyInfo) => {
+    setCompanySaving(true);
+    try {
+      await saveCompanyInfo(values);
+      message.success('公司信息保存成功');
+    } catch (error) {
+      message.error(getTauriErrorMessage(error) || '保存失败');
+    } finally {
+      setCompanySaving(false);
     }
   };
 
@@ -175,6 +194,46 @@ const Settings = () => {
     <div>
       <Title level={2} style={{ marginBottom: 24 }}>系统设置</Title>
       
+      <Card title={<Space><ShopOutlined /> 公司信息设置</Space>} style={{ marginBottom: 24 }}>
+        <Alert 
+          message="公司信息将用于打印对账单、报表等单据的抬头和落款。" 
+          type="info" 
+          showIcon 
+          style={{ marginBottom: 16 }} 
+        />
+        <Form
+          form={companyForm}
+          layout="vertical"
+          onFinish={handleSaveCompanyInfo}
+          style={{ maxWidth: 400 }}
+        >
+          <Form.Item
+            name="name"
+            label="公司/店铺名称"
+            rules={[{ required: true, message: '请输入公司/店铺名称' }]}
+          >
+            <Input placeholder="如：老伙计五金建材批发" />
+          </Form.Item>
+          <Form.Item
+            name="phone"
+            label="联系电话"
+          >
+            <Input placeholder="如：010-12345678 / 13800000000" />
+          </Form.Item>
+          <Form.Item
+            name="address"
+            label="联系地址"
+          >
+            <Input.TextArea placeholder="如：XX市XX区XX路18号" rows={2} />
+          </Form.Item>
+          <Form.Item>
+            <Button type="primary" htmlType="submit" icon={<SaveOutlined />} loading={companySaving}>
+              保存公司信息
+            </Button>
+          </Form.Item>
+        </Form>
+      </Card>
+
       <Card title={<Space><SettingOutlined /> 基础设置</Space>} style={{ marginBottom: 24 }} loading={loading}>
         <Form 
           form={form} 

@@ -116,19 +116,93 @@ button {
 }
 
 @media print {
+  body {
+    background-color: white !important;
+  }
+  
   .ant-layout-sider,
   .ant-layout-header,
   .no-print {
     display: none !important;
   }
-
-  body,
-  .ant-layout,
-  .ant-layout-content {
-    background: #fff !important;
+  
+  .ant-layout {
+    background: transparent !important;
+    min-height: auto !important;
   }
 
   .ant-layout-content {
     margin: 0 !important;
+  }
+
+  .print-root {
+    padding: 0 !important;
+    background: white !important;
+  }
+
+  .print-header,
+  .print-footer {
+    display: block !important;
+  }
+
+  /* 移除卡片边框和阴影 */
+  .statement-summary {
+    border: none !important;
+    box-shadow: none !important;
+    margin-bottom: 20px !important;
+    padding: 0 !important;
+  }
+  .statement-summary .ant-card-body {
+    padding: 0 !important;
+  }
+
+  /* 打印表格样式优化 */
+  .print-table {
+    width: 100% !important;
+  }
+  
+  .print-table .ant-table-wrapper,
+  .print-table .ant-table,
+  .print-table .ant-table-container,
+  .print-table .ant-table-content,
+  .print-table table {
+    border: 1px solid #000 !important;
+    border-radius: 0 !important;
+  }
+
+  .print-table .ant-table-thead > tr > th {
+    background-color: #f0f0f0 !important;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+    color: #000 !important;
+    border-bottom: 1px solid #000 !important;
+    border-right: 1px solid #000 !important;
+    font-weight: bold !important;
+    padding: 8px !important;
+  }
+
+  .print-table .ant-table-tbody > tr > td {
+    border-bottom: 1px solid #000 !important;
+    border-right: 1px solid #000 !important;
+    padding: 6px 8px !important;
+    color: #000 !important;
+  }
+
+  /* 去除最右侧边框重复 */
+  .print-table .ant-table-thead > tr > th:last-child,
+  .print-table .ant-table-tbody > tr > td:last-child {
+    border-right: none !important;
+  }
+
+  /* 防止表格行被切断 */
+  .print-table tr {
+    page-break-inside: avoid;
+  }
+
+  /* 保证打印文字黑色清晰 */
+  .ant-typography,
+  .ant-statistic-title,
+  .ant-statistic-content {
+    color: #000 !important;
   }
 }

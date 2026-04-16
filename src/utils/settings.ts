@@ -12,6 +12,12 @@ export interface Unit {
   created_at: string;
 }
 
+export interface CompanyInfo {
+  name: string;
+  phone: string;
+  address: string;
+}
+
 export const getLowStockThreshold = async (): Promise<number> => {
   try {
     return await invoke<number>('get_low_stock_threshold');
@@ -23,6 +29,20 @@ export const getLowStockThreshold = async (): Promise<number> => {
 
 export const setLowStockThreshold = async (threshold: number): Promise<void> => {
   await invoke('set_low_stock_threshold', { threshold });
+};
+
+// 公司信息 API
+export const getCompanyInfo = async (): Promise<CompanyInfo> => {
+  try {
+    return await invoke<CompanyInfo>('get_company_info');
+  } catch (error) {
+    console.error('获取公司信息失败:', error);
+    return { name: '', phone: '', address: '' };
+  }
+};
+
+export const setCompanyInfo = async (info: CompanyInfo): Promise<void> => {
+  await invoke('set_company_info', { ...info });
 };
 
 // 分类管理 API
