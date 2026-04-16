@@ -37,23 +37,32 @@ impl Database {
                 self.ensure_indexes()?;
                 self.migrate_to_v2()?;
                 self.migrate_to_v3()?;
-                self.conn.execute_batch("PRAGMA user_version = 3;")?;
+                self.migrate_to_v4()?;
+                self.conn.execute_batch("PRAGMA user_version = 4;")?;
                 Ok(())
             }
             1 => {
                 self.ensure_indexes()?;
                 self.migrate_to_v2()?;
                 self.migrate_to_v3()?;
-                self.conn.execute_batch("PRAGMA user_version = 3;")?;
+                self.migrate_to_v4()?;
+                self.conn.execute_batch("PRAGMA user_version = 4;")?;
                 Ok(())
             }
             2 => {
                 self.ensure_indexes()?;
                 self.migrate_to_v3()?;
-                self.conn.execute_batch("PRAGMA user_version = 3;")?;
+                self.migrate_to_v4()?;
+                self.conn.execute_batch("PRAGMA user_version = 4;")?;
                 Ok(())
             }
-            3 => self.ensure_indexes(),
+            3 => {
+                self.ensure_indexes()?;
+                self.migrate_to_v4()?;
+                self.conn.execute_batch("PRAGMA user_version = 4;")?;
+                Ok(())
+            }
+            4 => self.ensure_indexes(),
             other => Err(AppError::new(
                 "DB_VERSION_UNSUPPORTED",
                 format!("数据库版本不支持: {}", other),
@@ -182,6 +191,27 @@ impl Database {
         Ok(())
     }
 
+    fn migrate_to_v4(&self) -> Result<(), AppError> {
+        self.conn.execute_batch(
+            "
+            CREATE TABLE IF NOT EXISTS inventory_logs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                product_id INTEGER NOT NULL,
+                change_type TEXT NOT NULL, -- 'INBOUND', 'OUTBOUND', 'MANUAL_ADJUST', 'CREATE'
+                quantity INTEGER NOT NULL, -- 变动数量，正数或负数
+                previous_stock INTEGER NOT NULL, -- 变动前库存
+                current_stock INTEGER NOT NULL, -- 变动后库存
+                reference_id INTEGER, -- 关联的单据ID (入库单或出库单)
+                created_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
+                FOREIGN KEY (product_id) REFERENCES products(id)
+            );
+            CREATE INDEX IF NOT EXISTS idx_inventory_logs_product_id ON inventory_logs(product_id);
+            CREATE INDEX IF NOT EXISTS idx_inventory_logs_created_at ON inventory_logs(created_at);
+            ",
+        )?;
+        Ok(())
+    }
+
     pub fn get_low_stock_threshold(&self) -> Result<i32, AppError> {
         let result: Result<String, rusqlite::Error> = self.conn.query_row(
             "SELECT value FROM app_settings WHERE key = 'low_stock_threshold'",
@@ -258,11 +288,26 @@ impl Database {
         if stock < 0 {
             return Err(AppError::new("STOCK_NEGATIVE", "库存不能为负"));
         }
-        self.conn.execute(
+
+        let tx = self.conn.transaction()?;
+
+        tx.execute(
             "INSERT INTO products (name, category, unit, cost_price, sell_price, stock) VALUES (?, ?, ?, ?, ?, ?)",
             params![name, category, unit, cost_price, sell_price, stock],
         )?;
-        Ok(self.conn.last_insert_rowid())
+
+        let product_id = tx.last_insert_rowid();
+
+        // 如果初始库存大于0，写入建档流水
+        if stock > 0 {
+            tx.execute(
+                "INSERT INTO inventory_logs (product_id, change_type, quantity, previous_stock, current_stock) VALUES (?, 'CREATE', ?, 0, ?)",
+                params![product_id, stock, stock],
+            )?;
+        }
+
+        tx.commit()?;
+        Ok(product_id)
     }
 
     pub fn update_product(
@@ -287,10 +332,29 @@ impl Database {
         if stock < 0 {
             return Err(AppError::new("STOCK_NEGATIVE", "库存不能为负"));
         }
-        self.conn.execute(
+
+        let tx = self.conn.transaction()?;
+
+        let previous_stock: i32 = tx.query_row(
+            "SELECT stock FROM products WHERE id = ?",
+            params![id],
+            |row| row.get(0),
+        )?;
+
+        tx.execute(
             "UPDATE products SET name = ?, category = ?, unit = ?, cost_price = ?, sell_price = ?, stock = ?, updated_at = datetime('now', 'localtime') WHERE id = ?",
             params![name, category, unit, cost_price, sell_price, stock, id],
         )?;
+
+        let diff = stock - previous_stock;
+        if diff != 0 {
+            tx.execute(
+                "INSERT INTO inventory_logs (product_id, change_type, quantity, previous_stock, current_stock) VALUES (?, 'MANUAL_ADJUST', ?, ?, ?)",
+                params![id, diff, previous_stock, stock],
+            )?;
+        }
+
+        tx.commit()?;
         Ok(())
     }
 
@@ -343,6 +407,12 @@ impl Database {
 
         let tx = self.conn.transaction()?;
 
+        let previous_stock: i32 = tx.query_row(
+            "SELECT stock FROM products WHERE id = ?",
+            params![product_id],
+            |row| row.get(0),
+        )?;
+
         tx.execute(
             "INSERT INTO inbound_orders (product_id, quantity, price, total, supplier) VALUES (?, ?, ?, ?, ?)",
             params![product_id, quantity, price, total, supplier],
@@ -352,6 +422,12 @@ impl Database {
         tx.execute(
             "UPDATE products SET stock = stock + ?, updated_at = datetime('now', 'localtime') WHERE id = ?",
             params![quantity, product_id],
+        )?;
+
+        let current_stock = previous_stock + quantity;
+        tx.execute(
+            "INSERT INTO inventory_logs (product_id, change_type, quantity, previous_stock, current_stock, reference_id) VALUES (?, 'INBOUND', ?, ?, ?, ?)",
+            params![product_id, quantity, previous_stock, current_stock, row_id],
         )?;
 
         tx.commit()?;
@@ -394,6 +470,12 @@ impl Database {
         tx.execute(
             "UPDATE products SET stock = stock - ?, updated_at = datetime('now', 'localtime') WHERE id = ?",
             params![quantity, product_id],
+        )?;
+
+        let new_stock = current_stock - quantity;
+        tx.execute(
+            "INSERT INTO inventory_logs (product_id, change_type, quantity, previous_stock, current_stock, reference_id) VALUES (?, 'OUTBOUND', ?, ?, ?, ?)",
+            params![product_id, -quantity, current_stock, new_stock, row_id],
         )?;
 
         tx.commit()?;
@@ -768,5 +850,58 @@ impl Database {
         }
 
         Ok(records)
+    }
+
+    // 获取库存流水
+    pub fn get_inventory_logs(
+        &self,
+        product_id: Option<i64>,
+        start_date: Option<&str>,
+        end_date: Option<&str>,
+    ) -> Result<Vec<serde_json::Value>, AppError> {
+        let mut query = String::from(
+            "SELECT l.id, l.product_id, p.name as product_name, l.change_type, l.quantity, l.previous_stock, l.current_stock, l.reference_id, l.created_at
+             FROM inventory_logs l
+             JOIN products p ON l.product_id = p.id
+             WHERE 1=1"
+        );
+        let mut params: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
+
+        if let Some(pid) = product_id {
+            query.push_str(" AND l.product_id = ?");
+            params.push(Box::new(pid));
+        }
+
+        let end_with_time;
+        if let (Some(start), Some(end)) = (start_date, end_date) {
+            end_with_time = format!("{} 23:59:59", end);
+            query.push_str(" AND l.created_at BETWEEN ? AND ?");
+            params.push(Box::new(start.to_string()));
+            params.push(Box::new(end_with_time));
+        }
+
+        query.push_str(" ORDER BY l.id DESC LIMIT 500");
+
+        let mut stmt = self.conn.prepare(&query)?;
+
+        let rows = stmt.query_map(rusqlite::params_from_iter(params.iter()), |row| {
+            Ok(serde_json::json!({
+                "id": row.get::<_, i64>(0)?,
+                "product_id": row.get::<_, i64>(1)?,
+                "product_name": row.get::<_, String>(2)?,
+                "change_type": row.get::<_, String>(3)?,
+                "quantity": row.get::<_, i32>(4)?,
+                "previous_stock": row.get::<_, i32>(5)?,
+                "current_stock": row.get::<_, i32>(6)?,
+                "reference_id": row.get::<_, Option<i64>>(7)?,
+                "created_at": row.get::<_, String>(8)?,
+            }))
+        })?;
+
+        let mut logs = Vec::new();
+        for row in rows {
+            logs.push(row?);
+        }
+        Ok(logs)
     }
 }

@@ -378,6 +378,24 @@ async fn get_outbound_records(
     db.get_outbound_records(start_date.as_deref(), end_date.as_deref())
 }
 
+#[tauri::command]
+async fn get_inventory_logs(
+    product_id: Option<i64>,
+    start_date: Option<String>,
+    end_date: Option<String>,
+    state: State<'_, AppState>,
+) -> Result<Vec<serde_json::Value>, AppError> {
+    let db_guard = state
+        .db
+        .lock()
+        .map_err(|e| AppError::new("LOCK_ERROR", e.to_string()))?;
+    let db = db_guard
+        .as_ref()
+        .ok_or_else(|| AppError::new("DB_NOT_INIT", "数据库未初始化"))?;
+
+    db.get_inventory_logs(product_id, start_date.as_deref(), end_date.as_deref())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -407,6 +425,7 @@ pub fn run() {
             set_low_stock_threshold,
             get_inbound_records,
             get_outbound_records,
+            get_inventory_logs,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
