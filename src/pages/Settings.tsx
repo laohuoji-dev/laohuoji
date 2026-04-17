@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Card, Form, InputNumber, Button, message, Space, Typography, Alert, Modal, Input, List, Popconfirm, Tabs } from 'antd';
+import { Card, Form, InputNumber, Button, message, Space, Typography, Alert, Modal, Input, List, Popconfirm, Tabs, Switch, Divider } from 'antd';
 import { SaveOutlined, DownloadOutlined, UploadOutlined, DatabaseOutlined, SettingOutlined, DeleteOutlined, PlusOutlined, TagsOutlined, ExperimentOutlined, ShopOutlined } from '@ant-design/icons';
 import { invoke } from '@tauri-apps/api/core';
 import { save, open } from '@tauri-apps/plugin-dialog';
@@ -7,7 +7,8 @@ import {
   getLowStockThreshold, setLowStockThreshold as saveLowStockThreshold,
   getCategories, addCategory, deleteCategory, Category,
   getUnits, addUnit, deleteUnit, Unit,
-  getCompanyInfo, setCompanyInfo as saveCompanyInfo, CompanyInfo
+  getCompanyInfo, setCompanyInfo as saveCompanyInfo, CompanyInfo,
+  getAutoBackupConfig, setAutoBackupConfig as saveAutoBackupConfig, AutoBackupConfig
 } from '../utils/settings';
 import { getTauriErrorMessage } from '../utils/tauriError';
 
@@ -16,9 +17,11 @@ const { Title, Text } = Typography;
 const Settings = () => {
   const [form] = Form.useForm();
   const [companyForm] = Form.useForm();
+  const [autoBackupForm] = Form.useForm();
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [companySaving, setCompanySaving] = useState(false);
+  const [autoBackupSaving, setAutoBackupSaving] = useState(false);
   const [categories, setCategories] = useState<Category[]>([]);
   const [units, setUnits] = useState<Unit[]>([]);
   const [newCategoryName, setNewCategoryName] = useState('');
@@ -86,12 +89,14 @@ const Settings = () => {
   const loadSettings = async () => {
     setLoading(true);
     try {
-      const [threshold, companyInfo] = await Promise.all([
+      const [threshold, companyInfo, autoBackupConfig] = await Promise.all([
         getLowStockThreshold(),
-        getCompanyInfo()
+        getCompanyInfo(),
+        getAutoBackupConfig()
       ]);
       form.setFieldsValue({ lowStockThreshold: threshold });
       companyForm.setFieldsValue(companyInfo);
+      autoBackupForm.setFieldsValue(autoBackupConfig);
     } catch (error) {
       message.error(getTauriErrorMessage(error) || '加载设置失败');
     } finally {
@@ -120,6 +125,18 @@ const Settings = () => {
       message.error(getTauriErrorMessage(error) || '保存失败');
     } finally {
       setCompanySaving(false);
+    }
+  };
+
+  const handleSaveAutoBackup = async (values: AutoBackupConfig) => {
+    setAutoBackupSaving(true);
+    try {
+      await saveAutoBackupConfig(values.enabled, values.days);
+      message.success('自动备份设置已保存');
+    } catch (error) {
+      message.error(getTauriErrorMessage(error) || '保存自动备份设置失败');
+    } finally {
+      setAutoBackupSaving(false);
     }
   };
 
@@ -335,14 +352,42 @@ const Settings = () => {
         />
       </Card>
 
-      <Card title={<Space><DatabaseOutlined /> 数据管理</Space>}>
-        <Alert 
-          message="数据安全" 
-          description="建议定期备份数据库文件，以防数据丢失。恢复数据将覆盖当前所有数据，请谨慎操作。" 
-          type="info" 
-          showIcon 
-          style={{ marginBottom: 16 }}
-        />
+      <Card title={<Space><DatabaseOutlined /> 数据管理</Space>} style={{ marginBottom: 24 }}> 
+        <div style={{ marginBottom: 24 }}>
+          <Title level={5}>自动备份</Title>
+          <Text type="secondary" style={{ display: 'block', marginBottom: 16 }}>
+            开启后，系统会在每次启动时检查，如果距离上次备份超过设定的天数，则会自动将数据库备份到应用数据目录下（最多保留最近 5 份）。
+          </Text>
+          <Form
+            form={autoBackupForm}
+            layout="inline"
+            onFinish={handleSaveAutoBackup}
+            initialValues={{ enabled: true, days: 7 }}
+          >
+            <Form.Item name="enabled" valuePropName="checked">
+              <Switch checkedChildren="已开启" unCheckedChildren="已关闭" />
+            </Form.Item>
+            <Form.Item name="days" label="备份周期（天）">
+              <InputNumber min={1} max={365} />
+            </Form.Item>
+            <Form.Item>
+              <Button type="primary" htmlType="submit" loading={autoBackupSaving}>保存自动备份设置</Button>
+            </Form.Item>
+          </Form>
+        </div>
+
+        <Divider />
+
+        <div style={{ marginBottom: 16 }}>
+          <Title level={5}>手动备份与恢复</Title>
+          <Alert 
+            message="数据安全" 
+            description="建议定期手动备份数据库文件，以防数据丢失。恢复数据将覆盖当前所有数据，请谨慎操作。" 
+            type="info" 
+            showIcon 
+            style={{ marginBottom: 16 }}
+          />
+        </div>
         <Space size="middle" direction="vertical" style={{ width: '100%' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px', background: '#fafafa', borderRadius: 4 }}>
             <div>

@@ -18,6 +18,11 @@ export interface CompanyInfo {
   address: string;
 }
 
+export interface AutoBackupConfig {
+  enabled: boolean;
+  days: number;
+}
+
 export const getLowStockThreshold = async (): Promise<number> => {
   try {
     return await invoke<number>('get_low_stock_threshold');
@@ -43,6 +48,20 @@ export const getCompanyInfo = async (): Promise<CompanyInfo> => {
 
 export const setCompanyInfo = async (info: CompanyInfo): Promise<void> => {
   await invoke('set_company_info', { ...info });
+};
+
+// 自动备份配置 API
+export const getAutoBackupConfig = async (): Promise<AutoBackupConfig> => {
+  try {
+    return await invoke<AutoBackupConfig>('get_auto_backup_config');
+  } catch (error) {
+    console.error('获取自动备份配置失败:', error);
+    return { enabled: true, days: 7 };
+  }
+};
+
+export const setAutoBackupConfig = async (enabled: boolean, days: number): Promise<void> => {
+  await invoke('set_auto_backup_config', { enabled, days });
 };
 
 // 分类管理 API

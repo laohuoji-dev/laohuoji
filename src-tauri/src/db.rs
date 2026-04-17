@@ -16,6 +16,7 @@ impl Database {
 
         let db = Database { conn };
         db.migrate()?;
+        db.try_auto_backup()?;
         Ok(db)
     }
 
@@ -409,6 +410,138 @@ impl Database {
             params![address],
         )?;
         tx.commit()?;
+        Ok(())
+    }
+
+    pub fn get_auto_backup_config(&self) -> Result<serde_json::Value, AppError> {
+        use rusqlite::OptionalExtension;
+
+        let enabled_str: Option<String> = self
+            .conn
+            .query_row(
+                "SELECT value FROM app_settings WHERE key = 'auto_backup_enabled'",
+                [],
+                |row| row.get(0),
+            )
+            .optional()?;
+
+        let days_str: Option<String> = self
+            .conn
+            .query_row(
+                "SELECT value FROM app_settings WHERE key = 'auto_backup_days'",
+                [],
+                |row| row.get(0),
+            )
+            .optional()?;
+
+        let enabled = enabled_str.unwrap_or_else(|| "true".to_string()) == "true";
+        let days = days_str
+            .unwrap_or_else(|| "7".to_string())
+            .parse::<i32>()
+            .unwrap_or(7);
+
+        Ok(serde_json::json!({
+            "enabled": enabled,
+            "days": days,
+        }))
+    }
+
+    pub fn set_auto_backup_config(&mut self, enabled: bool, days: i32) -> Result<(), AppError> {
+        let tx = self.conn.transaction()?;
+        tx.execute(
+            "INSERT OR REPLACE INTO app_settings (key, value) VALUES ('auto_backup_enabled', ?)",
+            params![if enabled { "true" } else { "false" }],
+        )?;
+        tx.execute(
+            "INSERT OR REPLACE INTO app_settings (key, value) VALUES ('auto_backup_days', ?)",
+            params![days.to_string()],
+        )?;
+        tx.commit()?;
+        Ok(())
+    }
+
+    fn try_auto_backup(&self) -> Result<(), AppError> {
+        use rusqlite::OptionalExtension;
+
+        let config = self.get_auto_backup_config()?;
+        if !config["enabled"].as_bool().unwrap_or(false) {
+            return Ok(());
+        }
+
+        let backup_days = config["days"].as_i64().unwrap_or(7);
+
+        // 检查上次备份时间
+        let last_backup: Option<String> = self
+            .conn
+            .query_row(
+                "SELECT value FROM app_settings WHERE key = 'last_auto_backup_time'",
+                [],
+                |row| row.get(0),
+            )
+            .optional()?;
+
+        let should_backup = match last_backup {
+            Some(time_str) => {
+                let last_time =
+                    chrono::NaiveDateTime::parse_from_str(&time_str, "%Y-%m-%d %H:%M:%S").ok();
+                match last_time {
+                    Some(time) => {
+                        let now = chrono::Local::now().naive_local();
+                        let diff = now.signed_duration_since(time).num_days();
+                        diff >= backup_days
+                    }
+                    None => true,
+                }
+            }
+            None => true,
+        };
+
+        if should_backup {
+            let app_dir = dirs::data_dir()
+                .ok_or_else(|| AppError::new("DIR_ERROR", "无法获取系统数据目录"))?
+                .join("com.laohuoji.dev");
+
+            let backups_dir = app_dir.join("auto_backups");
+            if !backups_dir.exists() {
+                std::fs::create_dir_all(&backups_dir)
+                    .map_err(|e| AppError::new("IO_ERROR", e.to_string()))?;
+            }
+
+            let db_path = app_dir.join("inventory.db");
+            if db_path.exists() {
+                let timestamp = chrono::Local::now().format("%Y%m%d_%H%M%S").to_string();
+                let backup_path =
+                    backups_dir.join(format!("inventory_auto_backup_{}.db", timestamp));
+
+                if let Ok(_) = std::fs::copy(&db_path, &backup_path) {
+                    let now_str = chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
+                    let _ = self.conn.execute(
+                        "INSERT OR REPLACE INTO app_settings (key, value) VALUES ('last_auto_backup_time', ?)",
+                        params![now_str],
+                    );
+
+                    // 清理旧备份，保留最近 5 个
+                    if let Ok(entries) = std::fs::read_dir(&backups_dir) {
+                        let mut backups: Vec<_> = entries
+                            .filter_map(|e| e.ok())
+                            .filter(|e| e.path().extension().and_then(|s| s.to_str()) == Some("db"))
+                            .collect();
+
+                        if backups.len() > 5 {
+                            backups.sort_by_key(|e| {
+                                e.metadata()
+                                    .and_then(|m| m.modified())
+                                    .unwrap_or(std::time::SystemTime::UNIX_EPOCH)
+                            });
+                            for old_backup in backups.iter().take(backups.len() - 5) {
+                                let _ = std::fs::remove_file(old_backup.path());
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
         Ok(())
     }
 

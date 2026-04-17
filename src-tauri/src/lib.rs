@@ -630,6 +630,34 @@ async fn set_company_info(
     db.set_company_info(&name, &phone, &address)
 }
 
+#[tauri::command]
+async fn get_auto_backup_config(state: State<'_, AppState>) -> Result<serde_json::Value, AppError> {
+    let db_guard = state
+        .db
+        .lock()
+        .map_err(|e| AppError::new("LOCK_ERROR", e.to_string()))?;
+    let db = db_guard
+        .as_ref()
+        .ok_or_else(|| AppError::new("DB_NOT_INIT", "数据库未初始化"))?;
+    db.get_auto_backup_config()
+}
+
+#[tauri::command]
+async fn set_auto_backup_config(
+    enabled: bool,
+    days: i32,
+    state: State<'_, AppState>,
+) -> Result<(), AppError> {
+    let mut db_guard = state
+        .db
+        .lock()
+        .map_err(|e| AppError::new("LOCK_ERROR", e.to_string()))?;
+    let db = db_guard
+        .as_mut()
+        .ok_or_else(|| AppError::new("DB_NOT_INIT", "数据库未初始化"))?;
+    db.set_auto_backup_config(enabled, days)
+}
+
 // 记录查询命令
 #[tauri::command]
 async fn get_inbound_records(
@@ -759,6 +787,8 @@ pub fn run() {
             set_low_stock_threshold,
             get_company_info,
             set_company_info,
+            get_auto_backup_config,
+            set_auto_backup_config,
             get_inbound_records,
             get_outbound_records,
             get_inventory_logs,
