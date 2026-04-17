@@ -1,232 +1,181 @@
 import { useEffect, useState } from 'react';
-import { Card, Row, Col, Statistic, Button, List, Tag, message, Space } from 'antd';
-import { AppstoreOutlined, DollarOutlined, ShoppingCartOutlined, RiseOutlined, ReloadOutlined, WarningOutlined, ClockCircleOutlined } from '@ant-design/icons';
+import { Card, Row, Col, Statistic, Table, Typography, Space, Button } from 'antd';
+import { InboxOutlined, ShoppingCartOutlined, AppstoreOutlined, AccountBookOutlined, WarningOutlined, PlusOutlined, HistoryOutlined } from '@ant-design/icons';
 import { invoke } from '@tauri-apps/api/core';
 import SalesTrend from '../components/SalesTrend';
 import { getTauriErrorMessage } from '../utils/tauriError';
-import { getLowStockThreshold } from '../utils/settings';
 
-interface Statistics {
-  product_count: number;
-  total_stock: number;
-  total_value: number;
-  monthly_sales: number;
-  monthly_profit: number;
+const { Title } = Typography;
+
+interface DashboardStats {
+  total_products: number;
+  total_stock_value: number;
+  today_inbound: number;
+  today_outbound: number;
+}
+
+interface SlowProduct {
+  id: number;
+  name: string;
+  stock: number;
+  days_since_last_sale: number;
 }
 
 interface LowStockProduct {
   id: number;
   name: string;
-  category: string;
-  unit: string;
+  category: string | null;
   stock: number;
+  min_stock: number | null;
 }
 
-interface SlowMovingProduct {
-  id: number;
-  name: string;
-  category: string;
-  stock: number;
-  unit: string;
-  last_outbound: string;
-}
-
-const Dashboard = () => {
-  const [stats, setStats] = useState<Statistics>({
-    product_count: 0,
-    total_stock: 0,
-    total_value: 0,
-    monthly_sales: 0,
-    monthly_profit: 0,
-  });
+const Dashboard = ({ onChangeMenu }: { onChangeMenu?: (key: string) => void }) => {
+  const [stats, setStats] = useState<DashboardStats | null>(null);
+  const [slowProducts, setSlowProducts] = useState<SlowProduct[]>([]);
   const [lowStockProducts, setLowStockProducts] = useState<LowStockProduct[]>([]);
-  const [slowMovingProducts, setSlowMovingProducts] = useState<SlowMovingProduct[]>([]);
   const [loading, setLoading] = useState(true);
-  const [lowStockThreshold, setLowStockThresholdState] = useState<number>(10);
+  const [lowStockLoading, setLowStockLoading] = useState(false);
 
   useEffect(() => {
-    loadStatistics();
-    loadLowStockProducts();
-    loadSlowMovingProducts();
-    loadLowStockThreshold();
+    loadData();
+    loadLowStock();
   }, []);
 
-  const loadLowStockThreshold = async () => {
-    try {
-      const value = await getLowStockThreshold();
-      setLowStockThresholdState(value);
-    } catch (error) {
-      message.error(getTauriErrorMessage(error) || '加载低库存阈值失败');
-    }
-  };
-
-  const loadStatistics = async () => {
+  const loadData = async () => {
     setLoading(true);
     try {
-      const data = await invoke<Statistics>('get_statistics');
-      setStats(data);
+      const [statsData, slowData] = await Promise.all([
+        invoke<DashboardStats>('get_dashboard_stats'),
+        invoke<SlowProduct[]>('get_slow_moving_products', { days: 30, limit: 5 })
+      ]);
+      setStats(statsData);
+      setSlowProducts(slowData);
     } catch (error) {
-      console.error('Failed to load statistics:', error);
-      message.error(getTauriErrorMessage(error) || '加载统计数据失败');
+      console.error('Failed to load dashboard data:', error);
     } finally {
       setLoading(false);
     }
   };
 
-  const loadLowStockProducts = async () => {
+  const loadLowStock = async () => {
+    setLowStockLoading(true);
     try {
       const data = await invoke<LowStockProduct[]>('get_low_stock_products');
       setLowStockProducts(data);
     } catch (error) {
-      console.error('Failed to load low stock products:', error);
-      message.error(getTauriErrorMessage(error) || '加载库存预警失败');
+      console.error('Failed to load low stock:', error);
+    } finally {
+      setLowStockLoading(false);
     }
   };
 
-  const loadSlowMovingProducts = async () => {
-    try {
-      const data = await invoke<SlowMovingProduct[]>('get_slow_moving_products', { days: 30 });
-      setSlowMovingProducts(data);
-    } catch (error) {
-      console.error('Failed to load slow moving products:', error);
-      message.error(getTauriErrorMessage(error) || '加载滞销商品失败');
-    }
-  };
+  const slowColumns = [
+    { title: '商品名称', dataIndex: 'name' },
+    { title: '当前库存', dataIndex: 'stock' },
+    { title: '未出库天数', dataIndex: 'days_since_last_sale', render: (val: number) => <span style={{color: '#faad14'}}>{val}天</span> },
+  ];
+
+  const lowStockColumns = [
+    { title: '商品名称', dataIndex: 'name' },
+    { title: '分类', dataIndex: 'category', render: (val: string) => val || '-' },
+    { title: '当前库存', dataIndex: 'stock', render: (val: number) => <strong style={{color: '#cf1322'}}>{val}</strong> },
+    { title: '安全库存', dataIndex: 'min_stock', render: (val: number) => val || '-' },
+  ];
 
   return (
-    <div>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-        <h2>数据概览</h2>
-        <Space>
-          <Button
-            icon={<ReloadOutlined />}
-            onClick={() => {
-              loadStatistics();
-              loadLowStockThreshold();
-              loadLowStockProducts();
-              loadSlowMovingProducts();
-            }}
-            loading={loading}
-          >
-            刷新
-          </Button>
-        </Space>
-      </div>
-      <Row gutter={[16, 16]}>
-        <Col xs={24} sm={12} md={8}>
-          <Card loading={loading}>
+    <div style={{ padding: '0 0 24px 0' }}>
+      <Row gutter={[16, 16]} style={{ marginBottom: 24 }}>
+        <Col span={6}>
+          <Card bordered={false} loading={loading}>
             <Statistic
-              title="商品总数"
-              value={stats.product_count}
-              prefix={<AppstoreOutlined />}
-              suffix="个"
+              title="在售商品种类"
+              value={stats?.total_products || 0}
+              prefix={<AppstoreOutlined style={{ color: '#1890ff' }} />}
             />
           </Card>
         </Col>
-        <Col xs={24} sm={12} md={8}>
-          <Card loading={loading}>
+        <Col span={6}>
+          <Card bordered={false} loading={loading}>
             <Statistic
-              title="库存总数"
-              value={stats.total_stock}
-              prefix={<ShoppingCartOutlined />}
-              suffix="件"
+              title="今日入库单数"
+              value={stats?.today_inbound || 0}
+              prefix={<InboxOutlined style={{ color: '#52c41a' }} />}
             />
           </Card>
         </Col>
-        <Col xs={24} sm={12} md={8}>
-          <Card loading={loading}>
+        <Col span={6}>
+          <Card bordered={false} loading={loading}>
             <Statistic
-              title="库存总价值"
-              value={stats.total_value}
-              prefix={<DollarOutlined />}
+              title="今日出库单数"
+              value={stats?.today_outbound || 0}
+              prefix={<ShoppingCartOutlined style={{ color: '#fa8c16' }} />}
+            />
+          </Card>
+        </Col>
+        <Col span={6}>
+          <Card bordered={false} loading={loading}>
+            <Statistic
+              title="库存总成本(元)"
+              value={stats?.total_stock_value || 0}
               precision={2}
-              suffix="元"
-            />
-          </Card>
-        </Col>
-        <Col xs={24} sm={12} md={12}>
-          <Card loading={loading}>
-            <Statistic
-              title="本月销售额"
-              value={stats.monthly_sales}
-              prefix={<DollarOutlined />}
-              precision={2}
-              suffix="元"
-              valueStyle={{ color: '#3f8600' }}
-            />
-          </Card>
-        </Col>
-        <Col xs={24} sm={12} md={12}>
-          <Card loading={loading}>
-            <Statistic
-              title="本月利润"
-              value={stats.monthly_profit}
-              prefix={<RiseOutlined />}
-              precision={2}
-              suffix="元"
-              valueStyle={{ color: '#cf1322' }}
+              prefix={<AccountBookOutlined style={{ color: '#722ed1' }} />}
             />
           </Card>
         </Col>
       </Row>
-      {lowStockProducts.length > 0 && (
-        <Card
-          title={
-            <span>
-              <WarningOutlined style={{ color: '#cf1322', marginRight: 8 }} />
-              库存预警 (低于 {lowStockThreshold})
-              <Tag color="red" style={{ marginLeft: 8 }}>{lowStockProducts.length} 个商品</Tag>
-            </span>
-          }
-          style={{ marginTop: 16 }}
-          styles={{ body: { padding: 0 } }}
-        >
-          <List
-            size="small"
-            dataSource={lowStockProducts}
-            renderItem={(item) => (
-              <List.Item>
-                <List.Item.Meta
-                  title={item.name}
-                  description={item.category ? `分类: ${item.category}` : ''}
-                />
-                <Tag color="red">库存: {item.stock} {item.unit}</Tag>
-              </List.Item>
-            )}
-          />
-        </Card>
-      )}
-      <SalesTrend />
-      {slowMovingProducts.length > 0 && (
-        <Card
-          title={
-            <span>
-              <ClockCircleOutlined style={{ color: '#faad14', marginRight: 8 }} />
-              滞销商品预警
-              <Tag color="orange" style={{ marginLeft: 8 }}>{slowMovingProducts.length} 个商品</Tag>
-            </span>
-          }
-          style={{ marginTop: 16 }}
-          styles={{ body: { padding: 0 } }}
-        >
-          <List
-            size="small"
-            dataSource={slowMovingProducts}
-            renderItem={(item) => (
-              <List.Item>
-                <List.Item.Meta
-                  title={item.name}
-                  description={item.category ? `分类: ${item.category}` : ''}
-                />
-                <div style={{ textAlign: 'right' }}>
-                  <div><Tag color="orange">库存: {item.stock} {item.unit}</Tag></div>
-                  <div style={{ fontSize: 12, color: '#999', marginTop: 4 }}>最后出库: {item.last_outbound}</div>
-                </div>
-              </List.Item>
-            )}
-          />
-        </Card>
-      )}
+
+      <Row gutter={[16, 16]} style={{ marginBottom: 24 }}>
+        <Col span={16}>
+          <Card title="近30天销售趋势" bordered={false}>
+            <SalesTrend />
+          </Card>
+        </Col>
+        <Col span={8}>
+          <Card title="快捷操作" bordered={false} style={{ height: '100%' }}>
+            <Space direction="vertical" style={{ width: '100%' }} size="large">
+              <Button type="primary" block size="large" icon={<ShoppingCartOutlined />} onClick={() => onChangeMenu?.('outbound')}>
+                新建出库单
+              </Button>
+              <Button block size="large" icon={<InboxOutlined />} onClick={() => onChangeMenu?.('inbound')}>
+                新建入库单
+              </Button>
+              <Button block size="large" icon={<PlusOutlined />} onClick={() => onChangeMenu?.('products')}>
+                新增商品
+              </Button>
+              <Button block size="large" icon={<HistoryOutlined />} onClick={() => onChangeMenu?.('inventory-logs')}>
+                查库存流水
+              </Button>
+            </Space>
+          </Card>
+        </Col>
+      </Row>
+
+      <Row gutter={[16, 16]}>
+        <Col span={12}>
+          <Card title={<Space><WarningOutlined style={{color: '#cf1322'}} /> 库存预警 (需要补货)</Space>} bordered={false}>
+            <Table
+              dataSource={lowStockProducts}
+              columns={lowStockColumns}
+              rowKey="id"
+              pagination={{ pageSize: 5 }}
+              size="small"
+              loading={lowStockLoading}
+            />
+          </Card>
+        </Col>
+        <Col span={12}>
+          <Card title="滞销预警 (近30天未出库)" bordered={false}>
+            <Table
+              dataSource={slowProducts}
+              columns={slowColumns}
+              rowKey="id"
+              pagination={false}
+              size="small"
+              loading={loading}
+            />
+          </Card>
+        </Col>
+      </Row>
     </div>
   );
 };

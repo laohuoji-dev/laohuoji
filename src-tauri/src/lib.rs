@@ -520,6 +520,18 @@ async fn get_slow_moving_products(
 
 // 经营周报命令
 #[tauri::command]
+async fn get_dashboard_stats(state: State<'_, AppState>) -> Result<serde_json::Value, AppError> {
+    let db_guard = state
+        .db
+        .lock()
+        .map_err(|e| AppError::new("LOCK_ERROR", e.to_string()))?;
+    let db = db_guard
+        .as_ref()
+        .ok_or_else(|| AppError::new("DB_NOT_INIT", "数据库未初始化"))?;
+    db.get_dashboard_stats()
+}
+
+#[tauri::command]
 async fn get_weekly_report(state: State<'_, AppState>) -> Result<serde_json::Value, AppError> {
     let db_guard = state
         .db
@@ -794,6 +806,7 @@ pub fn run() {
             get_product_suggestions,
             get_sales_trend,
             get_slow_moving_products,
+            get_dashboard_stats,
             get_weekly_report,
             get_customer_statement,
             get_supplier_statement,

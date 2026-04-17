@@ -1303,6 +1303,46 @@ impl Database {
     }
 
     // 获取经营周报数据
+    pub fn get_dashboard_stats(&self) -> Result<serde_json::Value, AppError> {
+        // 1. 总商品种类数（在售的）
+        let total_products: i32 = self
+            .conn
+            .query_row(
+                "SELECT COUNT(*) FROM products WHERE status = 'ACTIVE'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap_or(0);
+
+        // 2. 总库存成本金额
+        let total_stock_value: f64 = self.conn.query_row(
+            "SELECT SUM(stock * cost_price) FROM products WHERE status = 'ACTIVE' AND stock > 0",
+            [],
+            |row| row.get(0),
+        ).unwrap_or(0.0);
+
+        // 3. 今日入库单数
+        let today_inbound: i32 = self.conn.query_row(
+            "SELECT COUNT(*) FROM inbound_orders WHERE date(created_at) = date('now', 'localtime')",
+            [],
+            |row| row.get(0),
+        ).unwrap_or(0);
+
+        // 4. 今日出库单数
+        let today_outbound: i32 = self.conn.query_row(
+            "SELECT COUNT(*) FROM outbound_orders WHERE date(created_at) = date('now', 'localtime')",
+            [],
+            |row| row.get(0),
+        ).unwrap_or(0);
+
+        Ok(serde_json::json!({
+            "total_products": total_products,
+            "total_stock_value": total_stock_value,
+            "today_inbound": today_inbound,
+            "today_outbound": today_outbound,
+        }))
+    }
+
     pub fn get_weekly_report(&self) -> Result<serde_json::Value, AppError> {
         let current_sales: f64 = self.conn.query_row(
             "SELECT COALESCE(SUM(total), 0) FROM outbound_orders WHERE created_at >= date('now', 'localtime', 'weekday 0', '-6 days')",

@@ -33,7 +33,7 @@ const { Header, Content, Sider } = Layout;
 
 function App() {
   const [isLoggedIn, setIsLoggedIn] = useState(false);
-  const [currentPage, setCurrentPage] = useState('dashboard');
+  const [currentMenu, setCurrentMenu] = useState('dashboard');
   const [loading, setLoading] = useState(true);
   const {
     token: { colorBgContainer, borderRadiusLG },
@@ -70,9 +70,9 @@ function App() {
   ];
 
   const renderContent = () => {
-    switch (currentPage) {
+    switch (currentMenu) {
       case 'dashboard':
-        return <Dashboard />;
+        return <Dashboard onChangeMenu={setCurrentMenu} />;
       case 'products':
         return <Products />;
       case 'inbound':
@@ -136,9 +136,9 @@ function App() {
         <Menu
           theme="dark"
           mode="inline"
-          selectedKeys={[currentPage]}
+          selectedKeys={[currentMenu]}
           items={menuItems}
-          onClick={({ key }) => setCurrentPage(key)}
+          onClick={({ key }) => setCurrentMenu(key)}
         />
         <Menu
           theme="dark"
