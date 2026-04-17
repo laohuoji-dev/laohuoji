@@ -147,6 +147,31 @@ const Dashboard = ({ onChangeMenu }: { onChangeMenu?: (key: string) => void }) =
         </Col>
       </Row>
 
+      <Row gutter={[16, 16]} style={{ marginBottom: 24 }}>
+        <Col span={12}>
+          <Card size="small" bordered={false} loading={loading}>
+            <Statistic
+              title="客户总欠款 (应收)"
+              value={(stats as any)?.total_receivables || 0}
+              precision={2}
+              valueStyle={{ color: '#1677ff' }}
+              prefix="¥"
+            />
+          </Card>
+        </Col>
+        <Col span={12}>
+          <Card size="small" bordered={false} loading={loading}>
+            <Statistic
+              title="欠供应商款 (应付)"
+              value={(stats as any)?.total_payables || 0}
+              precision={2}
+              valueStyle={{ color: '#cf1322' }}
+              prefix="¥"
+            />
+          </Card>
+        </Col>
+      </Row>
+
       <Row gutter={[16, 16]}>
         <Col span={12}>
           <Card title={<Space><WarningOutlined style={{color: '#cf1322'}} /> 库存预警 (需要补货)</Space>} bordered={false}>

@@ -33,6 +33,7 @@ struct InboundOrder {
     quantity: i32,
     price: f64,
     supplier: String,
+    paid_amount: Option<f64>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -41,6 +42,7 @@ struct OutboundOrder {
     quantity: i32,
     price: f64,
     customer: String,
+    paid_amount: Option<f64>,
 }
 
 // 密码相关命令
@@ -433,11 +435,14 @@ async fn add_inbound(order: InboundOrder, state: State<'_, AppState>) -> Result<
         .as_mut()
         .ok_or_else(|| AppError::new("DB_NOT_INIT", "数据库未初始化"))?;
 
+    // In frontend, we will pass paid_amount, but InboundOrder struct needs update.
+    // If we haven't updated it yet, it might fail. Let's update the struct too.
     db.add_inbound(
         order.product_id,
         order.quantity,
         order.price,
         &order.supplier,
+        order.paid_amount.unwrap_or(0.0),
     )
 }
 
@@ -456,7 +461,42 @@ async fn add_outbound(order: OutboundOrder, state: State<'_, AppState>) -> Resul
         order.quantity,
         order.price,
         &order.customer,
+        order.paid_amount.unwrap_or(0.0),
     )
+}
+
+#[tauri::command]
+async fn add_payment(
+    partner_type: String,
+    partner_name: String,
+    amount: f64,
+    remark: String,
+    state: State<'_, AppState>,
+) -> Result<(), AppError> {
+    let mut db_guard = state
+        .db
+        .lock()
+        .map_err(|e| AppError::new("LOCK_ERROR", e.to_string()))?;
+    let db = db_guard
+        .as_mut()
+        .ok_or_else(|| AppError::new("DB_NOT_INIT", "数据库未初始化"))?;
+    db.add_payment(&partner_type, &partner_name, amount, &remark)
+}
+
+#[tauri::command]
+async fn get_financial_logs(
+    partner_type: String,
+    partner_name: String,
+    state: State<'_, AppState>,
+) -> Result<Vec<serde_json::Value>, AppError> {
+    let db_guard = state
+        .db
+        .lock()
+        .map_err(|e| AppError::new("LOCK_ERROR", e.to_string()))?;
+    let db = db_guard
+        .as_ref()
+        .ok_or_else(|| AppError::new("DB_NOT_INIT", "数据库未初始化"))?;
+    db.get_financial_logs(&partner_type, &partner_name)
 }
 
 // 统计命令
@@ -838,6 +878,8 @@ pub fn run() {
             delete_supplier,
             import_products,
             batch_update_stock,
+            add_payment,
+            get_financial_logs,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -111,6 +111,7 @@ const Inbound = () => {
           quantity: values.quantity,
           price: values.price,
           supplier: values.supplier || '未填写',
+          paid_amount: Number(values.paid_amount || 0),
         },
       });
       message.success('入库成功');
@@ -155,7 +156,12 @@ const Inbound = () => {
     <div>
       <h2>入库管理</h2>
       <Card style={{ maxWidth: 600, marginBottom: 24 }}>
-        <Form form={form} onFinish={handleSubmit} layout="vertical">
+        <Form 
+          form={form} 
+          onFinish={handleSubmit} 
+          layout="vertical"
+          initialValues={{ quantity: 1, price: 0, paid_amount: 0 }}
+        >
           <Form.Item
             name="product_id"
             label="选择商品"
@@ -215,6 +221,26 @@ const Inbound = () => {
                 <Select.Option key={s.id} value={s.name}>{s.name}</Select.Option>
               ))}
             </Select>
+          </Form.Item>
+
+          <Form.Item label="本次实付">
+            <Space.Compact style={{ width: '100%' }}>
+              <Form.Item name="paid_amount" noStyle>
+                <InputNumber
+                  min={0}
+                  precision={2}
+                  style={{ width: '100%' }}
+                  placeholder="如赊账请留空或填0"
+                />
+              </Form.Item>
+              <Button onClick={() => {
+                const price = form.getFieldValue('price') || 0;
+                const qty = form.getFieldValue('quantity') || 0;
+                form.setFieldValue('paid_amount', price * qty);
+              }}>
+                全额付款
+              </Button>
+            </Space.Compact>
           </Form.Item>
 
           {Number(quantity) > 0 && Number(price) > 0 && (

@@ -45,7 +45,8 @@ impl Database {
                 self.migrate_to_v5()?;
                 self.migrate_to_v6()?;
                 self.migrate_to_v7()?;
-                self.conn.execute_batch("PRAGMA user_version = 7;")?;
+                self.migrate_to_v8()?;
+                self.conn.execute_batch("PRAGMA user_version = 8;")?;
                 Ok(())
             }
             1 => {
@@ -56,7 +57,8 @@ impl Database {
                 self.migrate_to_v5()?;
                 self.migrate_to_v6()?;
                 self.migrate_to_v7()?;
-                self.conn.execute_batch("PRAGMA user_version = 7;")?;
+                self.migrate_to_v8()?;
+                self.conn.execute_batch("PRAGMA user_version = 8;")?;
                 Ok(())
             }
             2 => {
@@ -66,7 +68,8 @@ impl Database {
                 self.migrate_to_v5()?;
                 self.migrate_to_v6()?;
                 self.migrate_to_v7()?;
-                self.conn.execute_batch("PRAGMA user_version = 7;")?;
+                self.migrate_to_v8()?;
+                self.conn.execute_batch("PRAGMA user_version = 8;")?;
                 Ok(())
             }
             3 => {
@@ -75,7 +78,8 @@ impl Database {
                 self.migrate_to_v5()?;
                 self.migrate_to_v6()?;
                 self.migrate_to_v7()?;
-                self.conn.execute_batch("PRAGMA user_version = 7;")?;
+                self.migrate_to_v8()?;
+                self.conn.execute_batch("PRAGMA user_version = 8;")?;
                 Ok(())
             }
             4 => {
@@ -83,23 +87,32 @@ impl Database {
                 self.migrate_to_v5()?;
                 self.migrate_to_v6()?;
                 self.migrate_to_v7()?;
-                self.conn.execute_batch("PRAGMA user_version = 7;")?;
+                self.migrate_to_v8()?;
+                self.conn.execute_batch("PRAGMA user_version = 8;")?;
                 Ok(())
             }
             5 => {
                 self.ensure_indexes()?;
                 self.migrate_to_v6()?;
                 self.migrate_to_v7()?;
-                self.conn.execute_batch("PRAGMA user_version = 7;")?;
+                self.migrate_to_v8()?;
+                self.conn.execute_batch("PRAGMA user_version = 8;")?;
                 Ok(())
             }
             6 => {
                 self.ensure_indexes()?;
                 self.migrate_to_v7()?;
-                self.conn.execute_batch("PRAGMA user_version = 7;")?;
+                self.migrate_to_v8()?;
+                self.conn.execute_batch("PRAGMA user_version = 8;")?;
                 Ok(())
             }
-            7 => self.ensure_indexes(),
+            7 => {
+                self.ensure_indexes()?;
+                self.migrate_to_v8()?;
+                self.conn.execute_batch("PRAGMA user_version = 8;")?;
+                Ok(())
+            }
+            8 => self.ensure_indexes(),
             other => Err(AppError::new(
                 "DB_VERSION_UNSUPPORTED",
                 format!("数据库版本不支持: {}", other),
@@ -324,6 +337,29 @@ impl Database {
             "
         )?;
 
+        Ok(())
+    }
+
+    fn migrate_to_v8(&self) -> Result<(), AppError> {
+        // Add balance to customers and suppliers, and create financial_logs table
+        self.conn.execute_batch(
+            "
+            ALTER TABLE customers ADD COLUMN balance REAL NOT NULL DEFAULT 0.0;
+            ALTER TABLE suppliers ADD COLUMN balance REAL NOT NULL DEFAULT 0.0;
+
+            CREATE TABLE IF NOT EXISTS financial_logs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                partner_type TEXT NOT NULL,
+                partner_name TEXT NOT NULL,
+                associated_order_id INTEGER,
+                change_amount REAL NOT NULL,
+                after_balance REAL NOT NULL,
+                remark TEXT,
+                created_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
+            );
+            CREATE INDEX IF NOT EXISTS idx_financial_logs_partner ON financial_logs(partner_type, partner_name);
+            "
+        )?;
         Ok(())
     }
 
@@ -781,7 +817,7 @@ impl Database {
 
     pub fn get_customers(&self) -> Result<Vec<serde_json::Value>, AppError> {
         let mut stmt = self.conn.prepare(
-            "SELECT id, name, contact, phone, created_at FROM customers ORDER BY id DESC",
+            "SELECT id, name, contact, phone, balance, created_at FROM customers ORDER BY id DESC",
         )?;
         let rows = stmt.query_map([], |row| {
             Ok(serde_json::json!({
@@ -789,7 +825,8 @@ impl Database {
                 "name": row.get::<_, String>(1)?,
                 "contact": row.get::<_, Option<String>>(2)?,
                 "phone": row.get::<_, Option<String>>(3)?,
-                "created_at": row.get::<_, String>(4)?,
+                "balance": row.get::<_, f64>(4)?,
+                "created_at": row.get::<_, String>(5)?,
             }))
         })?;
         let mut result = Vec::new();
@@ -854,7 +891,7 @@ impl Database {
 
     pub fn get_suppliers(&self) -> Result<Vec<serde_json::Value>, AppError> {
         let mut stmt = self.conn.prepare(
-            "SELECT id, name, contact, phone, created_at FROM suppliers ORDER BY id DESC",
+            "SELECT id, name, contact, phone, balance, created_at FROM suppliers ORDER BY id DESC",
         )?;
         let rows = stmt.query_map([], |row| {
             Ok(serde_json::json!({
@@ -862,7 +899,8 @@ impl Database {
                 "name": row.get::<_, String>(1)?,
                 "contact": row.get::<_, Option<String>>(2)?,
                 "phone": row.get::<_, Option<String>>(3)?,
-                "created_at": row.get::<_, String>(4)?,
+                "balance": row.get::<_, f64>(4)?,
+                "created_at": row.get::<_, String>(5)?,
             }))
         })?;
         let mut result = Vec::new();
@@ -1017,6 +1055,7 @@ impl Database {
         quantity: i32,
         price: f64,
         supplier: &str,
+        paid_amount: f64,
     ) -> Result<i64, AppError> {
         if quantity <= 0 {
             return Err(AppError::new("VALIDATION_ERROR", "数量必须大于 0"));
@@ -1051,6 +1090,33 @@ impl Database {
             params![product_id, quantity, previous_stock, current_stock, row_id],
         )?;
 
+        if !supplier.trim().is_empty() {
+            let current_balance: f64 = tx.query_row(
+                "SELECT balance FROM suppliers WHERE name = ?",
+                params![supplier],
+                |row| row.get(0),
+            ).unwrap_or(0.0);
+
+            let new_balance = current_balance + total - paid_amount;
+            
+            tx.execute(
+                "INSERT INTO suppliers (name, balance) VALUES (?1, ?2) ON CONFLICT(name) DO UPDATE SET balance = ?2",
+                params![supplier, new_balance],
+            )?;
+
+            tx.execute(
+                "INSERT INTO financial_logs (partner_type, partner_name, associated_order_id, change_amount, after_balance, remark) VALUES ('SUPPLIER', ?, ?, ?, ?, '采购入库')",
+                params![supplier, row_id, total, current_balance + total],
+            )?;
+
+            if paid_amount > 0.0 {
+                tx.execute(
+                    "INSERT INTO financial_logs (partner_type, partner_name, associated_order_id, change_amount, after_balance, remark) VALUES ('SUPPLIER', ?, ?, ?, ?, '开单付款')",
+                    params![supplier, row_id, -paid_amount, new_balance],
+                )?;
+            }
+        }
+
         tx.commit()?;
         Ok(row_id)
     }
@@ -1061,6 +1127,7 @@ impl Database {
         quantity: i32,
         price: f64,
         customer: &str,
+        paid_amount: f64,
     ) -> Result<i64, AppError> {
         if quantity <= 0 {
             return Err(AppError::new("VALIDATION_ERROR", "数量必须大于 0"));
@@ -1098,6 +1165,33 @@ impl Database {
             "INSERT INTO inventory_logs (product_id, change_type, quantity, previous_stock, current_stock, reference_id) VALUES (?, 'OUTBOUND', ?, ?, ?, ?)",
             params![product_id, -quantity, current_stock, new_stock, row_id],
         )?;
+
+        if !customer.trim().is_empty() {
+            let current_balance: f64 = tx.query_row(
+                "SELECT balance FROM customers WHERE name = ?",
+                params![customer],
+                |row| row.get(0),
+            ).unwrap_or(0.0);
+
+            let new_balance = current_balance + total - paid_amount;
+            
+            tx.execute(
+                "INSERT INTO customers (name, balance) VALUES (?1, ?2) ON CONFLICT(name) DO UPDATE SET balance = ?2",
+                params![customer, new_balance],
+            )?;
+
+            tx.execute(
+                "INSERT INTO financial_logs (partner_type, partner_name, associated_order_id, change_amount, after_balance, remark) VALUES ('CUSTOMER', ?, ?, ?, ?, '销售开单')",
+                params![customer, row_id, total, current_balance + total],
+            )?;
+
+            if paid_amount > 0.0 {
+                tx.execute(
+                    "INSERT INTO financial_logs (partner_type, partner_name, associated_order_id, change_amount, after_balance, remark) VALUES ('CUSTOMER', ?, ?, ?, ?, '开单付款')",
+                    params![customer, row_id, -paid_amount, new_balance],
+                )?;
+            }
+        }
 
         tx.commit()?;
         Ok(row_id)
@@ -1205,6 +1299,65 @@ impl Database {
         }
 
         Ok(records)
+    }
+
+    // --- 账款管理 ---
+    pub fn add_payment(
+        &mut self,
+        partner_type: &str,
+        partner_name: &str,
+        amount: f64,
+        remark: &str,
+    ) -> Result<(), AppError> {
+        let tx = self.conn.transaction()?;
+        let table = if partner_type == "CUSTOMER" { "customers" } else { "suppliers" };
+
+        let current_balance: f64 = tx.query_row(
+            &format!("SELECT balance FROM {} WHERE name = ?", table),
+            params![partner_name],
+            |row| row.get(0),
+        ).unwrap_or(0.0);
+
+        let new_balance = current_balance - amount;
+
+        tx.execute(
+            &format!("UPDATE {} SET balance = ? WHERE name = ?", table),
+            params![new_balance, partner_name],
+        )?;
+
+        tx.execute(
+            "INSERT INTO financial_logs (partner_type, partner_name, change_amount, after_balance, remark) VALUES (?, ?, ?, ?, ?)",
+            params![partner_type, partner_name, -amount, new_balance, remark],
+        )?;
+
+        tx.commit()?;
+        Ok(())
+    }
+
+    pub fn get_financial_logs(&self, partner_type: &str, partner_name: &str) -> Result<Vec<serde_json::Value>, AppError> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, associated_order_id, change_amount, after_balance, remark, created_at
+             FROM financial_logs
+             WHERE partner_type = ? AND partner_name = ?
+             ORDER BY created_at DESC"
+        )?;
+        
+        let rows = stmt.query_map(params![partner_type, partner_name], |row| {
+            Ok(serde_json::json!({
+                "id": row.get::<_, i64>(0)?,
+                "associated_order_id": row.get::<_, Option<i64>>(1)?,
+                "change_amount": row.get::<_, f64>(2)?,
+                "after_balance": row.get::<_, f64>(3)?,
+                "remark": row.get::<_, Option<String>>(4)?,
+                "created_at": row.get::<_, String>(5)?,
+            }))
+        })?;
+        
+        let mut logs = Vec::new();
+        for row in rows {
+            logs.push(row?);
+        }
+        Ok(logs)
     }
 
     // 智能补全 - 根据商品名称模糊匹配返回推荐
@@ -1335,11 +1488,27 @@ impl Database {
             |row| row.get(0),
         ).unwrap_or(0);
 
+        // 5. 客户总欠款 (应收款)
+        let total_receivables: f64 = self.conn.query_row(
+            "SELECT COALESCE(SUM(balance), 0) FROM customers",
+            [],
+            |row| row.get(0),
+        ).unwrap_or(0.0);
+
+        // 6. 供应商总欠款 (应付款)
+        let total_payables: f64 = self.conn.query_row(
+            "SELECT COALESCE(SUM(balance), 0) FROM suppliers",
+            [],
+            |row| row.get(0),
+        ).unwrap_or(0.0);
+
         Ok(serde_json::json!({
             "total_products": total_products,
             "total_stock_value": total_stock_value,
             "today_inbound": today_inbound,
             "today_outbound": today_outbound,
+            "total_receivables": total_receivables,
+            "total_payables": total_payables,
         }))
     }
 

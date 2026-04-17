@@ -111,6 +111,7 @@ const Outbound = () => {
           quantity: values.quantity,
           price: values.price,
           customer: values.customer || '未填写',
+          paid_amount: Number(values.paid_amount || 0),
         },
       });
       message.success('出库成功');
@@ -169,7 +170,12 @@ const Outbound = () => {
     <div>
       <h2>出库管理</h2>
       <Card style={{ maxWidth: 600, marginBottom: 24 }}>
-        <Form form={form} onFinish={handleSubmit} layout="vertical">
+        <Form 
+          form={form} 
+          onFinish={handleSubmit} 
+          layout="vertical"
+          initialValues={{ quantity: 1, price: 0, paid_amount: 0 }}
+        >
           <Form.Item
             name="product_id"
             label="选择商品"
@@ -243,6 +249,26 @@ const Outbound = () => {
             </Select>
           </Form.Item>
 
+          <Form.Item label="本次实收">
+            <Space.Compact style={{ width: '100%' }}>
+              <Form.Item name="paid_amount" noStyle>
+                <InputNumber
+                  min={0}
+                  precision={2}
+                  style={{ width: '100%' }}
+                  placeholder="如赊账请留空或填0"
+                />
+              </Form.Item>
+              <Button onClick={() => {
+                const price = form.getFieldValue('price') || 0;
+                const qty = form.getFieldValue('quantity') || 0;
+                form.setFieldValue('paid_amount', price * qty);
+              }}>
+                全额收款
+              </Button>
+            </Space.Compact>
+          </Form.Item>
+
           {Number(quantity) > 0 && Number(price) > 0 && (
             <div style={{ marginBottom: 16, padding: 12, background: '#f5f5f5', borderRadius: 4 }}>
               <strong>总金额: </strong>
@@ -261,7 +287,7 @@ const Outbound = () => {
               >
                 确认出库
               </Button>
-              <Button onClick={() => form.resetFields()}>重置</Button>
+              <Button onClick={() => { form.resetFields(); }}>重置</Button>
             </Space>
           </Form.Item>
         </Form>

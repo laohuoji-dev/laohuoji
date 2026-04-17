@@ -12,6 +12,15 @@ export interface Unit {
   created_at: string;
 }
 
+export interface Partner {
+  id: number;
+  name: string;
+  contact?: string;
+  phone?: string;
+  balance?: number;
+  created_at: string;
+}
+
 export interface CompanyInfo {
   name: string;
   phone: string;
