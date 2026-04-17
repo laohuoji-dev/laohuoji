@@ -1721,4 +1721,57 @@ impl Database {
         }
         Ok(logs)
     }
+
+    pub fn batch_update_stock(
+        &mut self,
+        adjustments: Vec<serde_json::Value>,
+    ) -> Result<usize, AppError> {
+        let tx = self.conn.transaction()?;
+        let mut count = 0;
+
+        for adj in adjustments {
+            let product_id = adj["product_id"].as_i64().unwrap_or(0);
+            let new_stock = adj["actual_stock"].as_i64().unwrap_or(0) as i32;
+            let _reason = adj["reason"].as_str().unwrap_or("盘点");
+
+            if product_id == 0 {
+                continue;
+            }
+
+            let previous_stock: i32 = match tx.query_row(
+                "SELECT stock FROM products WHERE id = ?",
+                params![product_id],
+                |row| row.get(0),
+            ) {
+                Ok(stock) => stock,
+                Err(_) => continue, // 商品不存在
+            };
+
+            let difference = new_stock - previous_stock;
+            if difference == 0 {
+                continue; // 没有变动
+            }
+
+            let change_type = if difference > 0 {
+                "INVENTORY_PROFIT"
+            } else {
+                "INVENTORY_LOSS"
+            };
+
+            tx.execute(
+                "UPDATE products SET stock = ?, updated_at = datetime('now', 'localtime') WHERE id = ?",
+                params![new_stock, product_id],
+            )?;
+
+            tx.execute(
+                "INSERT INTO inventory_logs (product_id, change_type, quantity, previous_stock, current_stock) VALUES (?, ?, ?, ?, ?)",
+                params![product_id, change_type, difference.abs(), previous_stock, new_stock],
+            )?;
+
+            count += 1;
+        }
+
+        tx.commit()?;
+        Ok(count)
+    }
 }

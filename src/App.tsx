@@ -12,6 +12,7 @@ import {
   HistoryOutlined,
   SettingOutlined,
   TeamOutlined,
+  SafetyCertificateOutlined,
 } from '@ant-design/icons';
 import { invoke } from '@tauri-apps/api/core';
 import Login from './pages/Login';
@@ -24,6 +25,7 @@ import Report from './pages/Report';
 import InventoryLogs from './pages/InventoryLogs';
 import Partners from './pages/Partners';
 import Statements from './pages/Statements';
+import InventoryCheck from './pages/InventoryCheck';
 import Settings from './pages/Settings';
 import './App.css';
 
@@ -61,6 +63,7 @@ function App() {
     { key: 'inbound', icon: <ShoppingCartOutlined />, label: '入库管理' },
     { key: 'outbound', icon: <SendOutlined />, label: '出库管理' },
     { key: 'inventory-logs', icon: <HistoryOutlined />, label: '库存流水' },
+    { key: 'inventory-check', icon: <SafetyCertificateOutlined />, label: '库存盘点' },
     { key: 'partners', icon: <TeamOutlined />, label: '往来单位' },
     { key: 'statements', icon: <FileDoneOutlined />, label: '对账与统计' },
     { key: 'report', icon: <FileTextOutlined />, label: '经营报告' },
@@ -84,6 +87,8 @@ function App() {
         return <Report />;
       case 'inventory-logs':
         return <InventoryLogs />;
+      case 'inventory-check':
+        return <InventoryCheck />;
       case 'change-password':
         return <ChangePassword />;
       case 'settings':

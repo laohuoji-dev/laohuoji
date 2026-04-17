@@ -407,6 +407,21 @@ async fn import_products(
     db.import_products(products)
 }
 
+#[tauri::command]
+async fn batch_update_stock(
+    adjustments: Vec<serde_json::Value>,
+    state: State<'_, AppState>,
+) -> Result<usize, AppError> {
+    let mut db_guard = state
+        .db
+        .lock()
+        .map_err(|e| AppError::new("LOCK_ERROR", e.to_string()))?;
+    let db = db_guard
+        .as_mut()
+        .ok_or_else(|| AppError::new("DB_NOT_INIT", "数据库未初始化"))?;
+    db.batch_update_stock(adjustments)
+}
+
 // 入库出库命令
 #[tauri::command]
 async fn add_inbound(order: InboundOrder, state: State<'_, AppState>) -> Result<i64, AppError> {
@@ -809,6 +824,7 @@ pub fn run() {
             update_supplier,
             delete_supplier,
             import_products,
+            batch_update_stock,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
