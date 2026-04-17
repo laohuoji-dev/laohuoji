@@ -137,8 +137,8 @@ const InventoryCheck = () => {
             const p = products.find(p => p.id === option?.value);
             if (!p) return false;
             const searchStr = input.toLowerCase();
-            return (p.name?.toLowerCase().includes(searchStr)) || 
-                   (p.barcode?.toLowerCase().includes(searchStr));
+            return !!((p.name?.toLowerCase().includes(searchStr)) || 
+                   (p.barcode?.toLowerCase().includes(searchStr)));
           }}
         >
           {products.map(p => (

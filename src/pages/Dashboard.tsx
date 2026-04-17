@@ -1,11 +1,8 @@
 import { useEffect, useState } from 'react';
-import { Card, Row, Col, Statistic, Table, Typography, Space, Button } from 'antd';
+import { Card, Row, Col, Statistic, Table, Space, Button } from 'antd';
 import { InboxOutlined, ShoppingCartOutlined, AppstoreOutlined, AccountBookOutlined, WarningOutlined, PlusOutlined, HistoryOutlined } from '@ant-design/icons';
 import { invoke } from '@tauri-apps/api/core';
 import SalesTrend from '../components/SalesTrend';
-import { getTauriErrorMessage } from '../utils/tauriError';
-
-const { Title } = Typography;
 
 interface DashboardStats {
   total_products: number;

@@ -149,13 +149,13 @@ function App() {
               key: 'settings',
               icon: <SettingOutlined />,
               label: '系统设置',
-              onClick: () => setCurrentPage('settings'),
+              onClick: () => setCurrentMenu('settings'),
             },
             {
               key: 'change-password',
               icon: <LockOutlined />,
               label: '修改密码',
-              onClick: () => setCurrentPage('change-password'),
+              onClick: () => setCurrentMenu('change-password'),
             },
             {
               key: 'logout',
@@ -169,9 +169,9 @@ function App() {
       <Layout style={{ marginLeft: 200 }}>
         <Header style={{ padding: 0, background: colorBgContainer }}>
           <div style={{ padding: '0 24px', fontSize: 18, fontWeight: 'bold' }}>
-            {menuItems.find((item) => item.key === currentPage)?.label || 
-             (currentPage === 'change-password' ? '修改密码' : 
-              currentPage === 'settings' ? '系统设置' : '')}
+            {menuItems.find((item) => item.key === currentMenu)?.label || 
+             (currentMenu === 'change-password' ? '修改密码' : 
+              currentMenu === 'settings' ? '系统设置' : '')}
           </div>
         </Header>
         <Content style={{ margin: '24px 16px 0' }}>
