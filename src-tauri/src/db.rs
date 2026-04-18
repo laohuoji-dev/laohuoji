@@ -1,4 +1,6 @@
-use rusqlite::{Connection, Result as SqliteResult};
+use crate::error::AppError;
+use rusqlite::{params, Connection};
+use std::time::Duration;
 use tauri::{AppHandle, Manager};
 
 pub struct Database {
@@ -6,26 +8,119 @@ pub struct Database {
 }
 
 impl Database {
-    pub fn new(app_handle: &AppHandle) -> SqliteResult<Self> {
-        // 获取应用数据目录
-        let app_data_dir = app_handle
-            .path()
-            .app_data_dir()
-            .expect("Failed to get app data dir");
-
-        // 创建目录（如果不存在）
-        std::fs::create_dir_all(&app_data_dir).expect("Failed to create app data dir");
-
-        let db_path = app_data_dir.join("inventory.db");
+    pub fn new(app_handle: &AppHandle) -> Result<Self, AppError> {
+        let db_path = Self::get_db_path(app_handle)?;
         let conn = Connection::open(db_path)?;
+        conn.execute_batch("PRAGMA foreign_keys = ON;")?;
+        conn.busy_timeout(Duration::from_secs(5))?;
 
         let db = Database { conn };
-        db.init_tables()?;
+        db.migrate()?;
+        db.try_auto_backup()?;
         Ok(db)
     }
 
-    fn init_tables(&self) -> SqliteResult<()> {
-        // 密码表
+    pub fn get_db_path(app_handle: &AppHandle) -> Result<std::path::PathBuf, AppError> {
+        let app_data_dir = app_handle
+            .path()
+            .app_data_dir()
+            .map_err(|e| AppError::new("PATH_ERROR", e.to_string()))?;
+
+        std::fs::create_dir_all(&app_data_dir)?;
+        Ok(app_data_dir.join("inventory.db"))
+    }
+
+    fn migrate(&self) -> Result<(), AppError> {
+        let user_version: i32 = self
+            .conn
+            .query_row("PRAGMA user_version", [], |row| row.get(0))?;
+
+        match user_version {
+            0 => {
+                self.init_tables()?;
+                self.ensure_indexes()?;
+                self.migrate_to_v2()?;
+                self.migrate_to_v3()?;
+                self.migrate_to_v4()?;
+                self.migrate_to_v5()?;
+                self.migrate_to_v6()?;
+                self.migrate_to_v7()?;
+                self.migrate_to_v8()?;
+                self.conn.execute_batch("PRAGMA user_version = 8;")?;
+                Ok(())
+            }
+            1 => {
+                self.ensure_indexes()?;
+                self.migrate_to_v2()?;
+                self.migrate_to_v3()?;
+                self.migrate_to_v4()?;
+                self.migrate_to_v5()?;
+                self.migrate_to_v6()?;
+                self.migrate_to_v7()?;
+                self.migrate_to_v8()?;
+                self.conn.execute_batch("PRAGMA user_version = 8;")?;
+                Ok(())
+            }
+            2 => {
+                self.ensure_indexes()?;
+                self.migrate_to_v3()?;
+                self.migrate_to_v4()?;
+                self.migrate_to_v5()?;
+                self.migrate_to_v6()?;
+                self.migrate_to_v7()?;
+                self.migrate_to_v8()?;
+                self.conn.execute_batch("PRAGMA user_version = 8;")?;
+                Ok(())
+            }
+            3 => {
+                self.ensure_indexes()?;
+                self.migrate_to_v4()?;
+                self.migrate_to_v5()?;
+                self.migrate_to_v6()?;
+                self.migrate_to_v7()?;
+                self.migrate_to_v8()?;
+                self.conn.execute_batch("PRAGMA user_version = 8;")?;
+                Ok(())
+            }
+            4 => {
+                self.ensure_indexes()?;
+                self.migrate_to_v5()?;
+                self.migrate_to_v6()?;
+                self.migrate_to_v7()?;
+                self.migrate_to_v8()?;
+                self.conn.execute_batch("PRAGMA user_version = 8;")?;
+                Ok(())
+            }
+            5 => {
+                self.ensure_indexes()?;
+                self.migrate_to_v6()?;
+                self.migrate_to_v7()?;
+                self.migrate_to_v8()?;
+                self.conn.execute_batch("PRAGMA user_version = 8;")?;
+                Ok(())
+            }
+            6 => {
+                self.ensure_indexes()?;
+                self.migrate_to_v7()?;
+                self.migrate_to_v8()?;
+                self.conn.execute_batch("PRAGMA user_version = 8;")?;
+                Ok(())
+            }
+            7 => {
+                self.ensure_indexes()?;
+                self.migrate_to_v8()?;
+                self.conn.execute_batch("PRAGMA user_version = 8;")?;
+                Ok(())
+            }
+            8 => self.ensure_indexes(),
+            other => Err(AppError::new(
+                "DB_VERSION_UNSUPPORTED",
+                format!("数据库版本不支持: {}", other),
+            )),
+        }
+    }
+
+    fn init_tables(&self) -> Result<(), AppError> {
         self.conn.execute(
             "CREATE TABLE IF NOT EXISTS passwords (
                 id INTEGER PRIMARY KEY,
@@ -34,7 +129,6 @@ impl Database {
             [],
         )?;
 
-        // 商品表
         self.conn.execute(
             "CREATE TABLE IF NOT EXISTS products (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -50,7 +144,6 @@ impl Database {
             [],
         )?;
 
-        // 入库记录
         self.conn.execute(
             "CREATE TABLE IF NOT EXISTS inbound_orders (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -65,7 +158,6 @@ impl Database {
             [],
         )?;
 
-        // 出库记录
         self.conn.execute(
             "CREATE TABLE IF NOT EXISTS outbound_orders (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -83,13 +175,421 @@ impl Database {
         Ok(())
     }
 
-    pub fn has_password(&self) -> SqliteResult<bool> {
-        let mut stmt = self.conn.prepare("SELECT COUNT(*) as count FROM passwords")?;
+    fn ensure_indexes(&self) -> Result<(), AppError> {
+        self.conn.execute_batch(
+            "
+            CREATE INDEX IF NOT EXISTS idx_products_name ON products(name);
+            CREATE INDEX IF NOT EXISTS idx_inbound_product_created_at ON inbound_orders(product_id, created_at);
+            CREATE INDEX IF NOT EXISTS idx_outbound_product_created_at ON outbound_orders(product_id, created_at);
+            ",
+        )?;
+        Ok(())
+    }
+
+    fn migrate_to_v2(&self) -> Result<(), AppError> {
+        self.conn.execute_batch(
+            "
+            CREATE TABLE IF NOT EXISTS app_settings (
+                key TEXT PRIMARY KEY,
+                value TEXT NOT NULL
+            );
+            ",
+        )?;
+        self.conn.execute(
+            "INSERT OR IGNORE INTO app_settings (key, value) VALUES ('low_stock_threshold', '10')",
+            [],
+        )?;
+        Ok(())
+    }
+
+    fn migrate_to_v3(&self) -> Result<(), AppError> {
+        self.conn.execute_batch(
+            "
+            CREATE TRIGGER IF NOT EXISTS trg_products_stock_nonnegative_insert
+            BEFORE INSERT ON products
+            FOR EACH ROW
+            WHEN NEW.stock < 0
+            BEGIN
+              SELECT RAISE(ABORT, '库存不能为负');
+            END;
+
+            CREATE TRIGGER IF NOT EXISTS trg_products_stock_nonnegative_update
+            BEFORE UPDATE OF stock ON products
+            FOR EACH ROW
+            WHEN NEW.stock < 0
+            BEGIN
+              SELECT RAISE(ABORT, '库存不能为负');
+            END;
+
+            CREATE TRIGGER IF NOT EXISTS trg_inbound_orders_quantity_positive
+            BEFORE INSERT ON inbound_orders
+            FOR EACH ROW
+            WHEN NEW.quantity <= 0
+            BEGIN
+              SELECT RAISE(ABORT, '数量必须大于 0');
+            END;
+
+            CREATE TRIGGER IF NOT EXISTS trg_outbound_orders_quantity_positive
+            BEFORE INSERT ON outbound_orders
+            FOR EACH ROW
+            WHEN NEW.quantity <= 0
+            BEGIN
+              SELECT RAISE(ABORT, '数量必须大于 0');
+            END;
+            ",
+        )?;
+        Ok(())
+    }
+
+    fn migrate_to_v4(&self) -> Result<(), AppError> {
+        self.conn.execute_batch(
+            "
+            CREATE TABLE IF NOT EXISTS inventory_logs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                product_id INTEGER NOT NULL,
+                change_type TEXT NOT NULL,
+                quantity INTEGER NOT NULL,
+                previous_stock INTEGER NOT NULL,
+                current_stock INTEGER NOT NULL,
+                reference_id INTEGER,
+                created_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
+                FOREIGN KEY (product_id) REFERENCES products(id)
+            );
+            CREATE INDEX IF NOT EXISTS idx_inventory_logs_product_id ON inventory_logs(product_id);
+            CREATE INDEX IF NOT EXISTS idx_inventory_logs_created_at ON inventory_logs(created_at);
+            ",
+        )?;
+        Ok(())
+    }
+
+    fn migrate_to_v5(&self) -> Result<(), AppError> {
+        self.conn.execute_batch(
+            "
+            ALTER TABLE products ADD COLUMN barcode TEXT;
+            ALTER TABLE products ADD COLUMN status TEXT NOT NULL DEFAULT 'ACTIVE';
+            ALTER TABLE products ADD COLUMN min_stock INTEGER NOT NULL DEFAULT 0;
+            CREATE INDEX IF NOT EXISTS idx_products_barcode ON products(barcode);
+            ",
+        )?;
+        Ok(())
+    }
+
+    fn migrate_to_v6(&self) -> Result<(), AppError> {
+        self.conn.execute_batch(
+            "
+            CREATE TABLE IF NOT EXISTS categories (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL UNIQUE,
+                created_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
+            );
+            CREATE TABLE IF NOT EXISTS units (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL UNIQUE,
+                created_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
+            );
+            ",
+        )?;
+
+        // 自动从现有商品数据中提取分类和单位进行初始化
+        self.conn.execute_batch(
+            "
+            INSERT OR IGNORE INTO categories (name) SELECT DISTINCT category FROM products WHERE category IS NOT NULL AND category != '';
+            INSERT OR IGNORE INTO units (name) SELECT DISTINCT unit FROM products WHERE unit IS NOT NULL AND unit != '';
+            "
+        )?;
+
+        // 如果提取后仍然为空，则插入一些默认值
+        self.conn.execute_batch(
+            "
+            INSERT OR IGNORE INTO categories (name) VALUES ('默认分类');
+            INSERT OR IGNORE INTO units (name) VALUES ('个'), ('件'), ('箱');
+            ",
+        )?;
+
+        Ok(())
+    }
+
+    fn migrate_to_v7(&self) -> Result<(), AppError> {
+        self.conn.execute_batch(
+            "
+            CREATE TABLE IF NOT EXISTS customers (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL UNIQUE,
+                contact TEXT,
+                phone TEXT,
+                created_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
+            );
+            CREATE TABLE IF NOT EXISTS suppliers (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL UNIQUE,
+                contact TEXT,
+                phone TEXT,
+                created_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
+            );
+            ",
+        )?;
+
+        // 自动从现有单据中提取供应商和客户
+        self.conn.execute_batch(
+            "
+            INSERT OR IGNORE INTO suppliers (name) SELECT DISTINCT supplier FROM inbound_orders WHERE supplier IS NOT NULL AND supplier != '';
+            INSERT OR IGNORE INTO customers (name) SELECT DISTINCT customer FROM outbound_orders WHERE customer IS NOT NULL AND customer != '';
+            "
+        )?;
+
+        Ok(())
+    }
+
+    fn migrate_to_v8(&self) -> Result<(), AppError> {
+        // Add balance to customers and suppliers, and create financial_logs table
+        self.conn.execute_batch(
+            "
+            ALTER TABLE customers ADD COLUMN balance REAL NOT NULL DEFAULT 0.0;
+            ALTER TABLE suppliers ADD COLUMN balance REAL NOT NULL DEFAULT 0.0;
+
+            CREATE TABLE IF NOT EXISTS financial_logs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                partner_type TEXT NOT NULL,
+                partner_name TEXT NOT NULL,
+                associated_order_id INTEGER,
+                change_amount REAL NOT NULL,
+                after_balance REAL NOT NULL,
+                remark TEXT,
+                created_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
+            );
+            CREATE INDEX IF NOT EXISTS idx_financial_logs_partner ON financial_logs(partner_type, partner_name);
+            "
+        )?;
+        Ok(())
+    }
+
+    pub fn get_low_stock_threshold(&self) -> Result<i32, AppError> {
+        let result: Result<String, rusqlite::Error> = self.conn.query_row(
+            "SELECT value FROM app_settings WHERE key = 'low_stock_threshold'",
+            [],
+            |row| row.get(0),
+        );
+        match result {
+            Ok(value) => value
+                .parse::<i32>()
+                .map_err(|e| AppError::new("SETTING_INVALID", e.to_string())),
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(10),
+            Err(e) => Err(e.into()),
+        }
+    }
+
+    pub fn set_low_stock_threshold(&mut self, threshold: i32) -> Result<(), AppError> {
+        if threshold <= 0 {
+            return Err(AppError::new("SETTING_INVALID", "阈值必须大于 0"));
+        }
+        self.conn.execute(
+            "INSERT INTO app_settings (key, value) VALUES ('low_stock_threshold', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            params![threshold.to_string()],
+        )?;
+        Ok(())
+    }
+
+    pub fn get_company_info(&self) -> Result<serde_json::Value, AppError> {
+        use rusqlite::OptionalExtension;
+
+        let name: Option<String> = self
+            .conn
+            .query_row(
+                "SELECT value FROM app_settings WHERE key = 'company_name'",
+                [],
+                |row| row.get(0),
+            )
+            .optional()?;
+
+        let phone: Option<String> = self
+            .conn
+            .query_row(
+                "SELECT value FROM app_settings WHERE key = 'company_phone'",
+                [],
+                |row| row.get(0),
+            )
+            .optional()?;
+
+        let address: Option<String> = self
+            .conn
+            .query_row(
+                "SELECT value FROM app_settings WHERE key = 'company_address'",
+                [],
+                |row| row.get(0),
+            )
+            .optional()?;
+
+        Ok(serde_json::json!({
+            "name": name.unwrap_or_default(),
+            "phone": phone.unwrap_or_default(),
+            "address": address.unwrap_or_default(),
+        }))
+    }
+
+    pub fn set_company_info(
+        &mut self,
+        name: &str,
+        phone: &str,
+        address: &str,
+    ) -> Result<(), AppError> {
+        let tx = self.conn.transaction()?;
+        tx.execute(
+            "INSERT OR REPLACE INTO app_settings (key, value) VALUES ('company_name', ?)",
+            params![name],
+        )?;
+        tx.execute(
+            "INSERT OR REPLACE INTO app_settings (key, value) VALUES ('company_phone', ?)",
+            params![phone],
+        )?;
+        tx.execute(
+            "INSERT OR REPLACE INTO app_settings (key, value) VALUES ('company_address', ?)",
+            params![address],
+        )?;
+        tx.commit()?;
+        Ok(())
+    }
+
+    pub fn get_auto_backup_config(&self) -> Result<serde_json::Value, AppError> {
+        use rusqlite::OptionalExtension;
+
+        let enabled_str: Option<String> = self
+            .conn
+            .query_row(
+                "SELECT value FROM app_settings WHERE key = 'auto_backup_enabled'",
+                [],
+                |row| row.get(0),
+            )
+            .optional()?;
+
+        let days_str: Option<String> = self
+            .conn
+            .query_row(
+                "SELECT value FROM app_settings WHERE key = 'auto_backup_days'",
+                [],
+                |row| row.get(0),
+            )
+            .optional()?;
+
+        let enabled = enabled_str.unwrap_or_else(|| "true".to_string()) == "true";
+        let days = days_str
+            .unwrap_or_else(|| "7".to_string())
+            .parse::<i32>()
+            .unwrap_or(7);
+
+        Ok(serde_json::json!({
+            "enabled": enabled,
+            "days": days,
+        }))
+    }
+
+    pub fn set_auto_backup_config(&mut self, enabled: bool, days: i32) -> Result<(), AppError> {
+        let tx = self.conn.transaction()?;
+        tx.execute(
+            "INSERT OR REPLACE INTO app_settings (key, value) VALUES ('auto_backup_enabled', ?)",
+            params![if enabled { "true" } else { "false" }],
+        )?;
+        tx.execute(
+            "INSERT OR REPLACE INTO app_settings (key, value) VALUES ('auto_backup_days', ?)",
+            params![days.to_string()],
+        )?;
+        tx.commit()?;
+        Ok(())
+    }
+
+    fn try_auto_backup(&self) -> Result<(), AppError> {
+        use rusqlite::OptionalExtension;
+
+        let config = self.get_auto_backup_config()?;
+        if !config["enabled"].as_bool().unwrap_or(false) {
+            return Ok(());
+        }
+
+        let backup_days = config["days"].as_i64().unwrap_or(7);
+
+        // 检查上次备份时间
+        let last_backup: Option<String> = self
+            .conn
+            .query_row(
+                "SELECT value FROM app_settings WHERE key = 'last_auto_backup_time'",
+                [],
+                |row| row.get(0),
+            )
+            .optional()?;
+
+        let should_backup = match last_backup {
+            Some(time_str) => {
+                let last_time =
+                    chrono::NaiveDateTime::parse_from_str(&time_str, "%Y-%m-%d %H:%M:%S").ok();
+                match last_time {
+                    Some(time) => {
+                        let now = chrono::Local::now().naive_local();
+                        let diff = now.signed_duration_since(time).num_days();
+                        diff >= backup_days
+                    }
+                    None => true,
+                }
+            }
+            None => true,
+        };
+
+        if should_backup {
+            let app_dir = dirs::data_dir()
+                .ok_or_else(|| AppError::new("DIR_ERROR", "无法获取系统数据目录"))?
+                .join("com.laohuoji.dev");
+
+            let backups_dir = app_dir.join("auto_backups");
+            if !backups_dir.exists() {
+                std::fs::create_dir_all(&backups_dir)
+                    .map_err(|e| AppError::new("IO_ERROR", e.to_string()))?;
+            }
+
+            let db_path = app_dir.join("inventory.db");
+            if db_path.exists() {
+                let timestamp = chrono::Local::now().format("%Y%m%d_%H%M%S").to_string();
+                let backup_path =
+                    backups_dir.join(format!("inventory_auto_backup_{}.db", timestamp));
+
+                if let Ok(_) = std::fs::copy(&db_path, &backup_path) {
+                    let now_str = chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
+                    let _ = self.conn.execute(
+                        "INSERT OR REPLACE INTO app_settings (key, value) VALUES ('last_auto_backup_time', ?)",
+                        params![now_str],
+                    );
+
+                    // 清理旧备份，保留最近 5 个
+                    if let Ok(entries) = std::fs::read_dir(&backups_dir) {
+                        let mut backups: Vec<_> = entries
+                            .filter_map(|e| e.ok())
+                            .filter(|e| e.path().extension().and_then(|s| s.to_str()) == Some("db"))
+                            .collect();
+
+                        if backups.len() > 5 {
+                            backups.sort_by_key(|e| {
+                                e.metadata()
+                                    .and_then(|m| m.modified())
+                                    .unwrap_or(std::time::SystemTime::UNIX_EPOCH)
+                            });
+                            for old_backup in backups.iter().take(backups.len() - 5) {
+                                let _ = std::fs::remove_file(old_backup.path());
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    pub fn has_password(&self) -> Result<bool, AppError> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT COUNT(*) as count FROM passwords")?;
         let count: i64 = stmt.query_row([], |row| row.get(0))?;
         Ok(count > 0)
     }
 
-    pub fn set_password(&self, password_hash: &str) -> SqliteResult<()> {
+    pub fn set_password(&self, password_hash: &str) -> Result<(), AppError> {
         self.conn.execute(
             "INSERT OR REPLACE INTO passwords (id, password_hash) VALUES (1, ?)",
             [password_hash],
@@ -97,54 +597,448 @@ impl Database {
         Ok(())
     }
 
-    pub fn get_password_hash(&self) -> SqliteResult<Option<String>> {
-        let mut stmt = self.conn.prepare("SELECT password_hash FROM passwords WHERE id = 1")?;
+    pub fn get_password_hash(&self) -> Result<Option<String>, AppError> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT password_hash FROM passwords WHERE id = 1")?;
         let result = stmt.query_row([], |row| row.get(0));
         match result {
             Ok(hash) => Ok(Some(hash)),
             Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
             Err(e) => Err(e),
         }
+        .map_err(Into::into)
     }
 
-    // 商品操作
-    pub fn add_product(&self, name: &str, category: &str, unit: &str, cost_price: f64, sell_price: f64, stock: i32) -> SqliteResult<i64> {
-        self.conn.execute(
-            "INSERT INTO products (name, category, unit, cost_price, sell_price, stock) VALUES (?, ?, ?, ?, ?, ?)",
-            [name, category, unit, &cost_price.to_string(), &sell_price.to_string(), &stock.to_string()],
+    pub fn add_product(
+        &mut self,
+        name: &str,
+        category: &str,
+        unit: &str,
+        cost_price: f64,
+        sell_price: f64,
+        stock: i32,
+        barcode: Option<&str>,
+        status: &str,
+        min_stock: i32,
+    ) -> Result<i64, AppError> {
+        if name.trim().is_empty() {
+            return Err(AppError::new("VALIDATION_ERROR", "商品名称不能为空"));
+        }
+        if unit.trim().is_empty() {
+            return Err(AppError::new("VALIDATION_ERROR", "单位不能为空"));
+        }
+        if cost_price < 0.0 || sell_price < 0.0 {
+            return Err(AppError::new("VALIDATION_ERROR", "价格不能为负"));
+        }
+        if stock < 0 {
+            return Err(AppError::new("STOCK_NEGATIVE", "库存不能为负"));
+        }
+
+        let tx = self.conn.transaction()?;
+
+        tx.execute(
+            "INSERT INTO products (name, category, unit, cost_price, sell_price, stock, barcode, status, min_stock) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            params![name, category, unit, cost_price, sell_price, stock, barcode, status, min_stock],
         )?;
-        Ok(self.conn.last_insert_rowid())
+
+        let product_id = tx.last_insert_rowid();
+
+        if stock > 0 {
+            tx.execute(
+                "INSERT INTO inventory_logs (product_id, change_type, quantity, previous_stock, current_stock) VALUES (?, 'CREATE', ?, 0, ?)",
+                params![product_id, stock, stock],
+            )?;
+        }
+
+        tx.commit()?;
+        Ok(product_id)
     }
 
-    pub fn update_product(&self, id: i64, name: &str, category: &str, unit: &str, cost_price: f64, sell_price: f64, stock: i32) -> SqliteResult<()> {
-        self.conn.execute(
-            "UPDATE products SET name = ?, category = ?, unit = ?, cost_price = ?, sell_price = ?, stock = ?, updated_at = datetime('now', 'localtime') WHERE id = ?",
-            [name, category, unit, &cost_price.to_string(), &sell_price.to_string(), &stock.to_string(), &id.to_string()],
+    pub fn update_product(
+        &mut self,
+        id: i64,
+        name: &str,
+        category: &str,
+        unit: &str,
+        cost_price: f64,
+        sell_price: f64,
+        stock: i32,
+        barcode: Option<&str>,
+        status: &str,
+        min_stock: i32,
+    ) -> Result<(), AppError> {
+        if name.trim().is_empty() {
+            return Err(AppError::new("VALIDATION_ERROR", "商品名称不能为空"));
+        }
+        if unit.trim().is_empty() {
+            return Err(AppError::new("VALIDATION_ERROR", "单位不能为空"));
+        }
+        if cost_price < 0.0 || sell_price < 0.0 {
+            return Err(AppError::new("VALIDATION_ERROR", "价格不能为负"));
+        }
+        if stock < 0 {
+            return Err(AppError::new("STOCK_NEGATIVE", "库存不能为负"));
+        }
+
+        let tx = self.conn.transaction()?;
+
+        let previous_stock: i32 = tx.query_row(
+            "SELECT stock FROM products WHERE id = ?",
+            params![id],
+            |row| row.get(0),
         )?;
+
+        tx.execute(
+            "UPDATE products SET name = ?, category = ?, unit = ?, cost_price = ?, sell_price = ?, stock = ?, barcode = ?, status = ?, min_stock = ?, updated_at = datetime('now', 'localtime') WHERE id = ?",
+            params![name, category, unit, cost_price, sell_price, stock, barcode, status, min_stock, id],
+        )?;
+
+        let diff = stock - previous_stock;
+        if diff != 0 {
+            tx.execute(
+                "INSERT INTO inventory_logs (product_id, change_type, quantity, previous_stock, current_stock) VALUES (?, 'MANUAL_ADJUST', ?, ?, ?)",
+                params![id, diff, previous_stock, stock],
+            )?;
+        }
+
+        tx.commit()?;
         Ok(())
     }
 
-    pub fn delete_product(&self, id: i64) -> SqliteResult<()> {
-        self.conn.execute("DELETE FROM products WHERE id = ?", [&id.to_string()])?;
+    pub fn delete_product(&mut self, id: i64) -> Result<(), AppError> {
+        let has_history: bool = self.conn.query_row(
+            "SELECT EXISTS(
+                SELECT 1 FROM inbound_orders WHERE product_id = ?
+                UNION ALL
+                SELECT 1 FROM outbound_orders WHERE product_id = ?
+                UNION ALL
+                SELECT 1 FROM inventory_logs WHERE product_id = ?
+            )",
+            params![id, id, id],
+            |row| row.get(0),
+        )?;
+
+        if has_history {
+            return Err(AppError::new(
+                "PRODUCT_HAS_HISTORY",
+                "该商品存在库存或单据流水，禁止删除。请将其库存归零或调整名称加以区分。",
+            ));
+        }
+
+        self.conn
+            .execute("DELETE FROM products WHERE id = ?", params![id])?;
         Ok(())
     }
 
-    pub fn get_products(&self) -> SqliteResult<Vec<serde_json::Value>> {
+    pub fn get_categories(&self) -> Result<Vec<serde_json::Value>, AppError> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT id, name, created_at FROM categories ORDER BY name ASC")?;
+        let rows = stmt.query_map([], |row| {
+            Ok(serde_json::json!({
+                "id": row.get::<_, i64>(0)?,
+                "name": row.get::<_, String>(1)?,
+                "created_at": row.get::<_, String>(2)?,
+            }))
+        })?;
+        let mut result = Vec::new();
+        for row in rows {
+            result.push(row?);
+        }
+        Ok(result)
+    }
+
+    pub fn add_category(&mut self, name: &str) -> Result<i64, AppError> {
+        if name.trim().is_empty() {
+            return Err(AppError::new("VALIDATION_ERROR", "分类名称不能为空"));
+        }
+        match self
+            .conn
+            .execute("INSERT INTO categories (name) VALUES (?)", params![name])
+        {
+            Ok(_) => Ok(self.conn.last_insert_rowid()),
+            Err(rusqlite::Error::SqliteFailure(e, _))
+                if e.code == rusqlite::ffi::ErrorCode::ConstraintViolation =>
+            {
+                Err(AppError::new("VALIDATION_ERROR", "分类名称已存在"))
+            }
+            Err(e) => Err(e.into()),
+        }
+    }
+
+    pub fn delete_category(&mut self, id: i64) -> Result<(), AppError> {
+        self.conn
+            .execute("DELETE FROM categories WHERE id = ?", params![id])?;
+        Ok(())
+    }
+
+    pub fn get_units(&self) -> Result<Vec<serde_json::Value>, AppError> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT id, name, created_at FROM units ORDER BY name ASC")?;
+        let rows = stmt.query_map([], |row| {
+            Ok(serde_json::json!({
+                "id": row.get::<_, i64>(0)?,
+                "name": row.get::<_, String>(1)?,
+                "created_at": row.get::<_, String>(2)?,
+            }))
+        })?;
+        let mut result = Vec::new();
+        for row in rows {
+            result.push(row?);
+        }
+        Ok(result)
+    }
+
+    pub fn add_unit(&mut self, name: &str) -> Result<i64, AppError> {
+        if name.trim().is_empty() {
+            return Err(AppError::new("VALIDATION_ERROR", "单位名称不能为空"));
+        }
+        match self
+            .conn
+            .execute("INSERT INTO units (name) VALUES (?)", params![name])
+        {
+            Ok(_) => Ok(self.conn.last_insert_rowid()),
+            Err(rusqlite::Error::SqliteFailure(e, _))
+                if e.code == rusqlite::ffi::ErrorCode::ConstraintViolation =>
+            {
+                Err(AppError::new("VALIDATION_ERROR", "单位名称已存在"))
+            }
+            Err(e) => Err(e.into()),
+        }
+    }
+
+    pub fn delete_unit(&mut self, id: i64) -> Result<(), AppError> {
+        self.conn
+            .execute("DELETE FROM units WHERE id = ?", params![id])?;
+        Ok(())
+    }
+
+    pub fn get_customers(&self) -> Result<Vec<serde_json::Value>, AppError> {
         let mut stmt = self.conn.prepare(
-            "SELECT id, name, category, unit, cost_price, sell_price, stock, created_at, updated_at FROM products ORDER BY id DESC"
+            "SELECT id, name, contact, phone, balance, created_at FROM customers ORDER BY id DESC",
+        )?;
+        let rows = stmt.query_map([], |row| {
+            Ok(serde_json::json!({
+                "id": row.get::<_, i64>(0)?,
+                "name": row.get::<_, String>(1)?,
+                "contact": row.get::<_, Option<String>>(2)?,
+                "phone": row.get::<_, Option<String>>(3)?,
+                "balance": row.get::<_, f64>(4)?,
+                "created_at": row.get::<_, String>(5)?,
+            }))
+        })?;
+        let mut result = Vec::new();
+        for row in rows {
+            result.push(row?);
+        }
+        Ok(result)
+    }
+
+    pub fn add_customer(
+        &mut self,
+        name: &str,
+        contact: Option<&str>,
+        phone: Option<&str>,
+    ) -> Result<i64, AppError> {
+        if name.trim().is_empty() {
+            return Err(AppError::new("VALIDATION_ERROR", "客户名称不能为空"));
+        }
+        match self.conn.execute(
+            "INSERT INTO customers (name, contact, phone) VALUES (?, ?, ?)",
+            params![name, contact, phone],
+        ) {
+            Ok(_) => Ok(self.conn.last_insert_rowid()),
+            Err(rusqlite::Error::SqliteFailure(e, _))
+                if e.code == rusqlite::ffi::ErrorCode::ConstraintViolation =>
+            {
+                Err(AppError::new("VALIDATION_ERROR", "客户名称已存在"))
+            }
+            Err(e) => Err(e.into()),
+        }
+    }
+
+    pub fn update_customer(
+        &mut self,
+        id: i64,
+        name: &str,
+        contact: Option<&str>,
+        phone: Option<&str>,
+    ) -> Result<(), AppError> {
+        if name.trim().is_empty() {
+            return Err(AppError::new("VALIDATION_ERROR", "客户名称不能为空"));
+        }
+        match self.conn.execute(
+            "UPDATE customers SET name = ?, contact = ?, phone = ? WHERE id = ?",
+            params![name, contact, phone, id],
+        ) {
+            Ok(_) => Ok(()),
+            Err(rusqlite::Error::SqliteFailure(e, _))
+                if e.code == rusqlite::ffi::ErrorCode::ConstraintViolation =>
+            {
+                Err(AppError::new("VALIDATION_ERROR", "客户名称已存在"))
+            }
+            Err(e) => Err(e.into()),
+        }
+    }
+
+    pub fn delete_customer(&mut self, id: i64) -> Result<(), AppError> {
+        self.conn
+            .execute("DELETE FROM customers WHERE id = ?", params![id])?;
+        Ok(())
+    }
+
+    pub fn get_suppliers(&self) -> Result<Vec<serde_json::Value>, AppError> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, name, contact, phone, balance, created_at FROM suppliers ORDER BY id DESC",
+        )?;
+        let rows = stmt.query_map([], |row| {
+            Ok(serde_json::json!({
+                "id": row.get::<_, i64>(0)?,
+                "name": row.get::<_, String>(1)?,
+                "contact": row.get::<_, Option<String>>(2)?,
+                "phone": row.get::<_, Option<String>>(3)?,
+                "balance": row.get::<_, f64>(4)?,
+                "created_at": row.get::<_, String>(5)?,
+            }))
+        })?;
+        let mut result = Vec::new();
+        for row in rows {
+            result.push(row?);
+        }
+        Ok(result)
+    }
+
+    pub fn add_supplier(
+        &mut self,
+        name: &str,
+        contact: Option<&str>,
+        phone: Option<&str>,
+    ) -> Result<i64, AppError> {
+        if name.trim().is_empty() {
+            return Err(AppError::new("VALIDATION_ERROR", "供应商名称不能为空"));
+        }
+        match self.conn.execute(
+            "INSERT INTO suppliers (name, contact, phone) VALUES (?, ?, ?)",
+            params![name, contact, phone],
+        ) {
+            Ok(_) => Ok(self.conn.last_insert_rowid()),
+            Err(rusqlite::Error::SqliteFailure(e, _))
+                if e.code == rusqlite::ffi::ErrorCode::ConstraintViolation =>
+            {
+                Err(AppError::new("VALIDATION_ERROR", "供应商名称已存在"))
+            }
+            Err(e) => Err(e.into()),
+        }
+    }
+
+    pub fn update_supplier(
+        &mut self,
+        id: i64,
+        name: &str,
+        contact: Option<&str>,
+        phone: Option<&str>,
+    ) -> Result<(), AppError> {
+        if name.trim().is_empty() {
+            return Err(AppError::new("VALIDATION_ERROR", "供应商名称不能为空"));
+        }
+        match self.conn.execute(
+            "UPDATE suppliers SET name = ?, contact = ?, phone = ? WHERE id = ?",
+            params![name, contact, phone, id],
+        ) {
+            Ok(_) => Ok(()),
+            Err(rusqlite::Error::SqliteFailure(e, _))
+                if e.code == rusqlite::ffi::ErrorCode::ConstraintViolation =>
+            {
+                Err(AppError::new("VALIDATION_ERROR", "供应商名称已存在"))
+            }
+            Err(e) => Err(e.into()),
+        }
+    }
+
+    pub fn delete_supplier(&mut self, id: i64) -> Result<(), AppError> {
+        self.conn
+            .execute("DELETE FROM suppliers WHERE id = ?", params![id])?;
+        Ok(())
+    }
+
+    pub fn import_products(&mut self, products: Vec<serde_json::Value>) -> Result<usize, AppError> {
+        let tx = self.conn.transaction()?;
+        let mut count = 0usize;
+
+        for p in products {
+            let name = p["name"].as_str().unwrap_or("").trim();
+            if name.is_empty() {
+                continue;
+            }
+
+            let category = p["category"].as_str().unwrap_or("").trim();
+            let unit = p["unit"].as_str().unwrap_or("").trim();
+            if unit.is_empty() {
+                continue;
+            }
+
+            let cost_price = p["cost_price"].as_f64().unwrap_or(0.0);
+            let sell_price = p["sell_price"].as_f64().unwrap_or(0.0);
+            let stock = p["stock"].as_i64().unwrap_or(0) as i32;
+            let barcode = p["barcode"]
+                .as_str()
+                .map(|s| s.trim())
+                .filter(|s| !s.is_empty());
+            let status = p["status"].as_str().unwrap_or("ACTIVE");
+            let min_stock = p["min_stock"].as_i64().unwrap_or(0) as i32;
+
+            if !category.is_empty() {
+                tx.execute(
+                    "INSERT OR IGNORE INTO categories (name) VALUES (?)",
+                    params![category],
+                )?;
+            }
+            tx.execute(
+                "INSERT OR IGNORE INTO units (name) VALUES (?)",
+                params![unit],
+            )?;
+
+            tx.execute(
+                "INSERT INTO products (name, category, unit, cost_price, sell_price, stock, barcode, status, min_stock) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                params![name, category, unit, cost_price, sell_price, stock, barcode, status, min_stock],
+            )?;
+            let product_id = tx.last_insert_rowid();
+
+            if stock > 0 {
+                tx.execute(
+                    "INSERT INTO inventory_logs (product_id, change_type, quantity, previous_stock, current_stock) VALUES (?, 'CREATE', ?, 0, ?)",
+                    params![product_id, stock, stock],
+                )?;
+            }
+
+            count += 1;
+        }
+
+        tx.commit()?;
+        Ok(count)
+    }
+
+    pub fn get_products(&self) -> Result<Vec<serde_json::Value>, AppError> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, name, category, unit, cost_price, sell_price, stock, barcode, status, min_stock, created_at, updated_at FROM products ORDER BY id DESC"
         )?;
 
         let rows = stmt.query_map([], |row| {
             Ok(serde_json::json!({
                 "id": row.get::<_, i64>(0)?,
                 "name": row.get::<_, String>(1)?,
-                "category": row.get::<_, String>(2)?,
+                "category": row.get::<_, Option<String>>(2)?,
                 "unit": row.get::<_, String>(3)?,
                 "cost_price": row.get::<_, f64>(4)?,
                 "sell_price": row.get::<_, f64>(5)?,
                 "stock": row.get::<_, i32>(6)?,
-                "created_at": row.get::<_, String>(7)?,
-                "updated_at": row.get::<_, String>(8)?,
+                "barcode": row.get::<_, Option<String>>(7)?,
+                "status": row.get::<_, String>(8)?,
+                "min_stock": row.get::<_, i32>(9)?,
+                "created_at": row.get::<_, String>(10)?,
+                "updated_at": row.get::<_, String>(11)?,
             }))
         })?;
 
@@ -155,78 +1049,165 @@ impl Database {
         Ok(products)
     }
 
-    // 入库操作
-    pub fn add_inbound(&self, product_id: i64, quantity: i32, price: f64, supplier: &str) -> SqliteResult<i64> {
+    pub fn add_inbound(
+        &mut self,
+        product_id: i64,
+        quantity: i32,
+        price: f64,
+        supplier: &str,
+        paid_amount: f64,
+    ) -> Result<i64, AppError> {
+        if quantity <= 0 {
+            return Err(AppError::new("VALIDATION_ERROR", "数量必须大于 0"));
+        }
+        if price < 0.0 {
+            return Err(AppError::new("VALIDATION_ERROR", "单价不能为负"));
+        }
         let total = quantity as f64 * price;
 
-        // 开始事务
-        let tx = self.conn.unchecked_transaction()?;
+        let tx = self.conn.transaction()?;
 
-        // 添加入库记录
+        let previous_stock: i32 = tx.query_row(
+            "SELECT stock FROM products WHERE id = ?",
+            params![product_id],
+            |row| row.get(0),
+        )?;
+
         tx.execute(
             "INSERT INTO inbound_orders (product_id, quantity, price, total, supplier) VALUES (?, ?, ?, ?, ?)",
-            [&product_id.to_string(), &quantity.to_string(), &price.to_string(), &total.to_string(), supplier],
+            params![product_id, quantity, price, total, supplier],
         )?;
+        let row_id = tx.last_insert_rowid();
 
-        // 更新库存
         tx.execute(
             "UPDATE products SET stock = stock + ?, updated_at = datetime('now', 'localtime') WHERE id = ?",
-            [&quantity.to_string(), &product_id.to_string()],
+            params![quantity, product_id],
         )?;
 
+        let current_stock = previous_stock + quantity;
+        tx.execute(
+            "INSERT INTO inventory_logs (product_id, change_type, quantity, previous_stock, current_stock, reference_id) VALUES (?, 'INBOUND', ?, ?, ?, ?)",
+            params![product_id, quantity, previous_stock, current_stock, row_id],
+        )?;
+
+        if !supplier.trim().is_empty() {
+            let current_balance: f64 = tx.query_row(
+                "SELECT balance FROM suppliers WHERE name = ?",
+                params![supplier],
+                |row| row.get(0),
+            ).unwrap_or(0.0);
+
+            let new_balance = current_balance + total - paid_amount;
+            
+            tx.execute(
+                "INSERT INTO suppliers (name, balance) VALUES (?1, ?2) ON CONFLICT(name) DO UPDATE SET balance = ?2",
+                params![supplier, new_balance],
+            )?;
+
+            tx.execute(
+                "INSERT INTO financial_logs (partner_type, partner_name, associated_order_id, change_amount, after_balance, remark) VALUES ('SUPPLIER', ?, ?, ?, ?, '采购入库')",
+                params![supplier, row_id, total, current_balance + total],
+            )?;
+
+            if paid_amount > 0.0 {
+                tx.execute(
+                    "INSERT INTO financial_logs (partner_type, partner_name, associated_order_id, change_amount, after_balance, remark) VALUES ('SUPPLIER', ?, ?, ?, ?, '开单付款')",
+                    params![supplier, row_id, -paid_amount, new_balance],
+                )?;
+            }
+        }
+
         tx.commit()?;
-        Ok(self.conn.last_insert_rowid())
+        Ok(row_id)
     }
 
-    // 出库操作
-    pub fn add_outbound(&self, product_id: i64, quantity: i32, price: f64, customer: &str) -> SqliteResult<i64> {
+    pub fn add_outbound(
+        &mut self,
+        product_id: i64,
+        quantity: i32,
+        price: f64,
+        customer: &str,
+        paid_amount: f64,
+    ) -> Result<i64, AppError> {
+        if quantity <= 0 {
+            return Err(AppError::new("VALIDATION_ERROR", "数量必须大于 0"));
+        }
+        if price < 0.0 {
+            return Err(AppError::new("VALIDATION_ERROR", "单价不能为负"));
+        }
         let total = quantity as f64 * price;
 
-        // 开始事务
-        let tx = self.conn.unchecked_transaction()?;
+        let tx = self.conn.transaction()?;
 
-        // 检查库存
         let current_stock: i32 = tx.query_row(
             "SELECT stock FROM products WHERE id = ?",
-            [&product_id.to_string()],
+            params![product_id],
             |row| row.get(0),
         )?;
 
         if current_stock < quantity {
-            return Err(rusqlite::Error::InvalidParameterName("库存不足".to_string()));
+            return Err(AppError::new("STOCK_INSUFFICIENT", "库存不足"));
         }
 
-        // 添加出库记录
         tx.execute(
             "INSERT INTO outbound_orders (product_id, quantity, price, total, customer) VALUES (?, ?, ?, ?, ?)",
-            [&product_id.to_string(), &quantity.to_string(), &price.to_string(), &total.to_string(), customer],
+            params![product_id, quantity, price, total, customer],
         )?;
+        let row_id = tx.last_insert_rowid();
 
-        // 更新库存
         tx.execute(
             "UPDATE products SET stock = stock - ?, updated_at = datetime('now', 'localtime') WHERE id = ?",
-            [&quantity.to_string(), &product_id.to_string()],
+            params![quantity, product_id],
         )?;
+
+        let new_stock = current_stock - quantity;
+        tx.execute(
+            "INSERT INTO inventory_logs (product_id, change_type, quantity, previous_stock, current_stock, reference_id) VALUES (?, 'OUTBOUND', ?, ?, ?, ?)",
+            params![product_id, -quantity, current_stock, new_stock, row_id],
+        )?;
+
+        if !customer.trim().is_empty() {
+            let current_balance: f64 = tx.query_row(
+                "SELECT balance FROM customers WHERE name = ?",
+                params![customer],
+                |row| row.get(0),
+            ).unwrap_or(0.0);
+
+            let new_balance = current_balance + total - paid_amount;
+            
+            tx.execute(
+                "INSERT INTO customers (name, balance) VALUES (?1, ?2) ON CONFLICT(name) DO UPDATE SET balance = ?2",
+                params![customer, new_balance],
+            )?;
+
+            tx.execute(
+                "INSERT INTO financial_logs (partner_type, partner_name, associated_order_id, change_amount, after_balance, remark) VALUES ('CUSTOMER', ?, ?, ?, ?, '销售开单')",
+                params![customer, row_id, total, current_balance + total],
+            )?;
+
+            if paid_amount > 0.0 {
+                tx.execute(
+                    "INSERT INTO financial_logs (partner_type, partner_name, associated_order_id, change_amount, after_balance, remark) VALUES ('CUSTOMER', ?, ?, ?, ?, '开单付款')",
+                    params![customer, row_id, -paid_amount, new_balance],
+                )?;
+            }
+        }
 
         tx.commit()?;
-        Ok(self.conn.last_insert_rowid())
+        Ok(row_id)
     }
 
-    // 统计数据
-    pub fn get_statistics(&self) -> SqliteResult<serde_json::Value> {
-        // 商品总数
-        let product_count: i64 = self.conn.query_row(
-            "SELECT COUNT(*) FROM products",
-            [],
-            |row| row.get(0),
-        )?;
+    pub fn get_statistics(&self) -> Result<serde_json::Value, AppError> {
+        let product_count: i64 =
+            self.conn
+                .query_row("SELECT COUNT(*) FROM products", [], |row| row.get(0))?;
 
         // 库存总数
-        let total_stock: i64 = self.conn.query_row(
-            "SELECT COALESCE(SUM(stock), 0) FROM products",
-            [],
-            |row| row.get(0),
-        )?;
+        let total_stock: i64 =
+            self.conn
+                .query_row("SELECT COALESCE(SUM(stock), 0) FROM products", [], |row| {
+                    row.get(0)
+                })?;
 
         // 库存总价值（按成本价）
         let total_value: f64 = self.conn.query_row(
@@ -262,7 +1243,11 @@ impl Database {
     }
 
     // 获取入库记录
-    pub fn get_inbound_records(&self, start_date: Option<&str>, end_date: Option<&str>) -> SqliteResult<Vec<serde_json::Value>> {
+    pub fn get_inbound_records(
+        &self,
+        start_date: Option<&str>,
+        end_date: Option<&str>,
+    ) -> Result<Vec<serde_json::Value>, AppError> {
         let mut records = Vec::new();
 
         if let (Some(start), Some(end)) = (start_date, end_date) {
@@ -316,15 +1301,74 @@ impl Database {
         Ok(records)
     }
 
+    // --- 账款管理 ---
+    pub fn add_payment(
+        &mut self,
+        partner_type: &str,
+        partner_name: &str,
+        amount: f64,
+        remark: &str,
+    ) -> Result<(), AppError> {
+        let tx = self.conn.transaction()?;
+        let table = if partner_type == "CUSTOMER" { "customers" } else { "suppliers" };
+
+        let current_balance: f64 = tx.query_row(
+            &format!("SELECT balance FROM {} WHERE name = ?", table),
+            params![partner_name],
+            |row| row.get(0),
+        ).unwrap_or(0.0);
+
+        let new_balance = current_balance - amount;
+
+        tx.execute(
+            &format!("UPDATE {} SET balance = ? WHERE name = ?", table),
+            params![new_balance, partner_name],
+        )?;
+
+        tx.execute(
+            "INSERT INTO financial_logs (partner_type, partner_name, change_amount, after_balance, remark) VALUES (?, ?, ?, ?, ?)",
+            params![partner_type, partner_name, -amount, new_balance, remark],
+        )?;
+
+        tx.commit()?;
+        Ok(())
+    }
+
+    pub fn get_financial_logs(&self, partner_type: &str, partner_name: &str) -> Result<Vec<serde_json::Value>, AppError> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, associated_order_id, change_amount, after_balance, remark, created_at
+             FROM financial_logs
+             WHERE partner_type = ? AND partner_name = ?
+             ORDER BY created_at DESC"
+        )?;
+        
+        let rows = stmt.query_map(params![partner_type, partner_name], |row| {
+            Ok(serde_json::json!({
+                "id": row.get::<_, i64>(0)?,
+                "associated_order_id": row.get::<_, Option<i64>>(1)?,
+                "change_amount": row.get::<_, f64>(2)?,
+                "after_balance": row.get::<_, f64>(3)?,
+                "remark": row.get::<_, Option<String>>(4)?,
+                "created_at": row.get::<_, String>(5)?,
+            }))
+        })?;
+        
+        let mut logs = Vec::new();
+        for row in rows {
+            logs.push(row?);
+        }
+        Ok(logs)
+    }
+
     // 智能补全 - 根据商品名称模糊匹配返回推荐
-    pub fn get_product_suggestions(&self, name: &str) -> SqliteResult<Vec<serde_json::Value>> {
+    pub fn get_product_suggestions(&self, name: &str) -> Result<Vec<serde_json::Value>, AppError> {
         let pattern = format!("%{}%", name);
         let mut stmt = self.conn.prepare(
             "SELECT DISTINCT category, unit, cost_price, sell_price 
              FROM products 
              WHERE name LIKE ? AND category IS NOT NULL AND category != ''
              ORDER BY updated_at DESC 
-             LIMIT 3"
+             LIMIT 3",
         )?;
         let rows = stmt.query_map([&pattern], |row| {
             Ok(serde_json::json!({
@@ -342,8 +1386,7 @@ impl Database {
     }
 
     // 获取销售趋势 - 近7天 vs 上月同期7天
-    pub fn get_sales_trend(&self) -> SqliteResult<serde_json::Value> {
-        // 最近7天销售额
+    pub fn get_sales_trend(&self) -> Result<serde_json::Value, AppError> {
         let mut daily = Vec::new();
         for i in (0..7).rev() {
             let date: String = self.conn.query_row(
@@ -382,7 +1425,7 @@ impl Database {
     }
 
     // 获取滞销商品 - 指定天数内没有出库记录
-    pub fn get_slow_moving_products(&self, days: i32) -> SqliteResult<Vec<serde_json::Value>> {
+    pub fn get_slow_moving_products(&self, days: i32) -> Result<Vec<serde_json::Value>, AppError> {
         let mut stmt = self.conn.prepare(
             "SELECT p.id, p.name, p.category, p.stock, p.unit,
                     COALESCE(MAX(o.created_at), '无记录') as last_outbound
@@ -391,7 +1434,7 @@ impl Database {
              GROUP BY p.id
              HAVING last_outbound = '无记录'
                 OR julianday('now', 'localtime') - julianday(last_outbound) > ?
-             ORDER BY last_outbound ASC"
+             ORDER BY last_outbound ASC",
         )?;
 
         let rows = stmt.query_map([days], |row| {
@@ -413,8 +1456,63 @@ impl Database {
     }
 
     // 获取经营周报数据
-    pub fn get_weekly_report(&self) -> SqliteResult<serde_json::Value> {
-        // 本周数据
+    pub fn get_dashboard_stats(&self) -> Result<serde_json::Value, AppError> {
+        // 1. 总商品种类数（在售的）
+        let total_products: i32 = self
+            .conn
+            .query_row(
+                "SELECT COUNT(*) FROM products WHERE status = 'ACTIVE'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap_or(0);
+
+        // 2. 总库存成本金额
+        let total_stock_value: f64 = self.conn.query_row(
+            "SELECT SUM(stock * cost_price) FROM products WHERE status = 'ACTIVE' AND stock > 0",
+            [],
+            |row| row.get(0),
+        ).unwrap_or(0.0);
+
+        // 3. 今日入库单数
+        let today_inbound: i32 = self.conn.query_row(
+            "SELECT COUNT(*) FROM inbound_orders WHERE date(created_at) = date('now', 'localtime')",
+            [],
+            |row| row.get(0),
+        ).unwrap_or(0);
+
+        // 4. 今日出库单数
+        let today_outbound: i32 = self.conn.query_row(
+            "SELECT COUNT(*) FROM outbound_orders WHERE date(created_at) = date('now', 'localtime')",
+            [],
+            |row| row.get(0),
+        ).unwrap_or(0);
+
+        // 5. 客户总欠款 (应收款)
+        let total_receivables: f64 = self.conn.query_row(
+            "SELECT COALESCE(SUM(balance), 0) FROM customers",
+            [],
+            |row| row.get(0),
+        ).unwrap_or(0.0);
+
+        // 6. 供应商总欠款 (应付款)
+        let total_payables: f64 = self.conn.query_row(
+            "SELECT COALESCE(SUM(balance), 0) FROM suppliers",
+            [],
+            |row| row.get(0),
+        ).unwrap_or(0.0);
+
+        Ok(serde_json::json!({
+            "total_products": total_products,
+            "total_stock_value": total_stock_value,
+            "today_inbound": today_inbound,
+            "today_outbound": today_outbound,
+            "total_receivables": total_receivables,
+            "total_payables": total_payables,
+        }))
+    }
+
+    pub fn get_weekly_report(&self) -> Result<serde_json::Value, AppError> {
         let current_sales: f64 = self.conn.query_row(
             "SELECT COALESCE(SUM(total), 0) FROM outbound_orders WHERE created_at >= date('now', 'localtime', 'weekday 0', '-6 days')",
             [],
@@ -496,16 +1594,214 @@ impl Database {
         }))
     }
 
+    pub fn get_customer_statement(
+        &self,
+        customer: Option<&str>,
+        start_date: Option<&str>,
+        end_date: Option<&str>,
+    ) -> Result<serde_json::Value, AppError> {
+        let (customer_filter, customer_param): (&str, Option<&str>) = match customer {
+            Some(v) if !v.trim().is_empty() => (" AND o.customer = ? ", Some(v)),
+            _ => ("", None),
+        };
+
+        let (date_filter, date_params): (&str, Vec<&str>) = match (start_date, end_date) {
+            (Some(start), Some(end)) => {
+                (" AND date(o.created_at) BETWEEN ? AND ? ", vec![start, end])
+            }
+            _ => ("", vec![]),
+        };
+
+        let mut summary_params: Vec<&str> = Vec::new();
+        if let Some(v) = customer_param {
+            summary_params.push(v);
+        }
+        summary_params.extend(date_params.iter().copied());
+
+        let summary_sql = format!(
+            "SELECT
+                COALESCE(SUM(o.total), 0) AS sales_total,
+                COALESCE(SUM(o.quantity), 0) AS quantity_total,
+                COALESCE(SUM(o.quantity * p.cost_price), 0) AS cost_total,
+                COALESCE(SUM(o.quantity * (o.price - p.cost_price)), 0) AS profit_total,
+                COUNT(*) AS order_count,
+                COUNT(DISTINCT o.product_id) AS product_count
+             FROM outbound_orders o
+             JOIN products p ON o.product_id = p.id
+             WHERE 1 = 1 {} {}",
+            customer_filter, date_filter
+        );
+
+        let summary: serde_json::Value = self.conn.query_row(
+            &summary_sql,
+            rusqlite::params_from_iter(summary_params.iter()),
+            |row| {
+                Ok(serde_json::json!({
+                    "sales_total": row.get::<_, f64>(0)?,
+                    "quantity_total": row.get::<_, i64>(1)?,
+                    "cost_total": row.get::<_, f64>(2)?,
+                    "profit_total": row.get::<_, f64>(3)?,
+                    "order_count": row.get::<_, i64>(4)?,
+                    "product_count": row.get::<_, i64>(5)?,
+                }))
+            },
+        )?;
+
+        let mut items_params: Vec<&str> = Vec::new();
+        if let Some(v) = customer_param {
+            items_params.push(v);
+        }
+        items_params.extend(date_params.iter().copied());
+
+        let items_sql = format!(
+            "SELECT
+                p.id,
+                p.name,
+                p.unit,
+                COALESCE(SUM(o.quantity), 0) AS quantity,
+                COALESCE(SUM(o.total), 0) AS sales_total,
+                COALESCE(SUM(o.quantity * p.cost_price), 0) AS cost_total,
+                COALESCE(SUM(o.quantity * (o.price - p.cost_price)), 0) AS profit_total
+             FROM outbound_orders o
+             JOIN products p ON o.product_id = p.id
+             WHERE 1 = 1 {} {}
+             GROUP BY p.id
+             ORDER BY sales_total DESC",
+            customer_filter, date_filter
+        );
+
+        let mut stmt = self.conn.prepare(&items_sql)?;
+        let rows = stmt.query_map(rusqlite::params_from_iter(items_params.iter()), |row| {
+            Ok(serde_json::json!({
+                "product_id": row.get::<_, i64>(0)?,
+                "product_name": row.get::<_, String>(1)?,
+                "unit": row.get::<_, String>(2)?,
+                "quantity": row.get::<_, i64>(3)?,
+                "sales_total": row.get::<_, f64>(4)?,
+                "cost_total": row.get::<_, f64>(5)?,
+                "profit_total": row.get::<_, f64>(6)?,
+            }))
+        })?;
+        let mut items = Vec::new();
+        for row in rows {
+            items.push(row?);
+        }
+
+        Ok(serde_json::json!({
+            "type": "customer",
+            "name": customer.unwrap_or(""),
+            "start_date": start_date,
+            "end_date": end_date,
+            "summary": summary,
+            "items": items
+        }))
+    }
+
+    pub fn get_supplier_statement(
+        &self,
+        supplier: Option<&str>,
+        start_date: Option<&str>,
+        end_date: Option<&str>,
+    ) -> Result<serde_json::Value, AppError> {
+        let (supplier_filter, supplier_param): (&str, Option<&str>) = match supplier {
+            Some(v) if !v.trim().is_empty() => (" AND o.supplier = ? ", Some(v)),
+            _ => ("", None),
+        };
+
+        let (date_filter, date_params): (&str, Vec<&str>) = match (start_date, end_date) {
+            (Some(start), Some(end)) => {
+                (" AND date(o.created_at) BETWEEN ? AND ? ", vec![start, end])
+            }
+            _ => ("", vec![]),
+        };
+
+        let mut summary_params: Vec<&str> = Vec::new();
+        if let Some(v) = supplier_param {
+            summary_params.push(v);
+        }
+        summary_params.extend(date_params.iter().copied());
+
+        let summary_sql = format!(
+            "SELECT
+                COALESCE(SUM(o.total), 0) AS purchase_total,
+                COALESCE(SUM(o.quantity), 0) AS quantity_total,
+                COUNT(*) AS order_count,
+                COUNT(DISTINCT o.product_id) AS product_count
+             FROM inbound_orders o
+             WHERE 1 = 1 {} {}",
+            supplier_filter, date_filter
+        );
+
+        let summary: serde_json::Value = self.conn.query_row(
+            &summary_sql,
+            rusqlite::params_from_iter(summary_params.iter()),
+            |row| {
+                Ok(serde_json::json!({
+                    "purchase_total": row.get::<_, f64>(0)?,
+                    "quantity_total": row.get::<_, i64>(1)?,
+                    "order_count": row.get::<_, i64>(2)?,
+                    "product_count": row.get::<_, i64>(3)?,
+                }))
+            },
+        )?;
+
+        let mut items_params: Vec<&str> = Vec::new();
+        if let Some(v) = supplier_param {
+            items_params.push(v);
+        }
+        items_params.extend(date_params.iter().copied());
+
+        let items_sql = format!(
+            "SELECT
+                p.id,
+                p.name,
+                p.unit,
+                COALESCE(SUM(o.quantity), 0) AS quantity,
+                COALESCE(SUM(o.total), 0) AS purchase_total
+             FROM inbound_orders o
+             JOIN products p ON o.product_id = p.id
+             WHERE 1 = 1 {} {}
+             GROUP BY p.id
+             ORDER BY purchase_total DESC",
+            supplier_filter, date_filter
+        );
+
+        let mut stmt = self.conn.prepare(&items_sql)?;
+        let rows = stmt.query_map(rusqlite::params_from_iter(items_params.iter()), |row| {
+            Ok(serde_json::json!({
+                "product_id": row.get::<_, i64>(0)?,
+                "product_name": row.get::<_, String>(1)?,
+                "unit": row.get::<_, String>(2)?,
+                "quantity": row.get::<_, i64>(3)?,
+                "purchase_total": row.get::<_, f64>(4)?,
+            }))
+        })?;
+        let mut items = Vec::new();
+        for row in rows {
+            items.push(row?);
+        }
+
+        Ok(serde_json::json!({
+            "type": "supplier",
+            "name": supplier.unwrap_or(""),
+            "start_date": start_date,
+            "end_date": end_date,
+            "summary": summary,
+            "items": items
+        }))
+    }
+
     // 获取低库存预警商品
-    pub fn get_low_stock_products(&self) -> SqliteResult<Vec<serde_json::Value>> {
+    pub fn get_low_stock_products(&self) -> Result<Vec<serde_json::Value>, AppError> {
+        let threshold = self.get_low_stock_threshold()?;
         let mut stmt = self.conn.prepare(
             "SELECT id, name, category, unit, cost_price, sell_price, stock 
              FROM products 
-             WHERE stock < 10 
-             ORDER BY stock ASC"
+             WHERE stock < ? 
+             ORDER BY stock ASC",
         )?;
 
-        let rows = stmt.query_map([], |row| {
+        let rows = stmt.query_map(params![threshold], |row| {
             Ok(serde_json::json!({
                 "id": row.get::<_, i64>(0)?,
                 "name": row.get::<_, String>(1)?,
@@ -525,7 +1821,11 @@ impl Database {
     }
 
     // 获取出库记录
-    pub fn get_outbound_records(&self, start_date: Option<&str>, end_date: Option<&str>) -> SqliteResult<Vec<serde_json::Value>> {
+    pub fn get_outbound_records(
+        &self,
+        start_date: Option<&str>,
+        end_date: Option<&str>,
+    ) -> Result<Vec<serde_json::Value>, AppError> {
         let mut records = Vec::new();
 
         if let (Some(start), Some(end)) = (start_date, end_date) {
@@ -577,5 +1877,110 @@ impl Database {
         }
 
         Ok(records)
+    }
+
+    pub fn get_inventory_logs(
+        &self,
+        product_id: Option<i64>,
+        start_date: Option<&str>,
+        end_date: Option<&str>,
+    ) -> Result<Vec<serde_json::Value>, AppError> {
+        let mut query = String::from(
+            "SELECT l.id, l.product_id, p.name as product_name, l.change_type, l.quantity, l.previous_stock, l.current_stock, l.reference_id, l.created_at
+             FROM inventory_logs l
+             JOIN products p ON l.product_id = p.id
+             WHERE 1=1"
+        );
+        let mut params: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
+
+        if let Some(pid) = product_id {
+            query.push_str(" AND l.product_id = ?");
+            params.push(Box::new(pid));
+        }
+
+        let end_with_time;
+        if let (Some(start), Some(end)) = (start_date, end_date) {
+            end_with_time = format!("{} 23:59:59", end);
+            query.push_str(" AND l.created_at BETWEEN ? AND ?");
+            params.push(Box::new(start.to_string()));
+            params.push(Box::new(end_with_time));
+        }
+
+        query.push_str(" ORDER BY l.id DESC LIMIT 500");
+
+        let mut stmt = self.conn.prepare(&query)?;
+
+        let rows = stmt.query_map(rusqlite::params_from_iter(params.iter()), |row| {
+            Ok(serde_json::json!({
+                "id": row.get::<_, i64>(0)?,
+                "product_id": row.get::<_, i64>(1)?,
+                "product_name": row.get::<_, String>(2)?,
+                "change_type": row.get::<_, String>(3)?,
+                "quantity": row.get::<_, i32>(4)?,
+                "previous_stock": row.get::<_, i32>(5)?,
+                "current_stock": row.get::<_, i32>(6)?,
+                "reference_id": row.get::<_, Option<i64>>(7)?,
+                "created_at": row.get::<_, String>(8)?,
+            }))
+        })?;
+
+        let mut logs = Vec::new();
+        for row in rows {
+            logs.push(row?);
+        }
+        Ok(logs)
+    }
+
+    pub fn batch_update_stock(
+        &mut self,
+        adjustments: Vec<serde_json::Value>,
+    ) -> Result<usize, AppError> {
+        let tx = self.conn.transaction()?;
+        let mut count = 0;
+
+        for adj in adjustments {
+            let product_id = adj["product_id"].as_i64().unwrap_or(0);
+            let new_stock = adj["actual_stock"].as_i64().unwrap_or(0) as i32;
+            let _reason = adj["reason"].as_str().unwrap_or("盘点");
+
+            if product_id == 0 {
+                continue;
+            }
+
+            let previous_stock: i32 = match tx.query_row(
+                "SELECT stock FROM products WHERE id = ?",
+                params![product_id],
+                |row| row.get(0),
+            ) {
+                Ok(stock) => stock,
+                Err(_) => continue, // 商品不存在
+            };
+
+            let difference = new_stock - previous_stock;
+            if difference == 0 {
+                continue; // 没有变动
+            }
+
+            let change_type = if difference > 0 {
+                "INVENTORY_PROFIT"
+            } else {
+                "INVENTORY_LOSS"
+            };
+
+            tx.execute(
+                "UPDATE products SET stock = ?, updated_at = datetime('now', 'localtime') WHERE id = ?",
+                params![new_stock, product_id],
+            )?;
+
+            tx.execute(
+                "INSERT INTO inventory_logs (product_id, change_type, quantity, previous_stock, current_stock) VALUES (?, ?, ?, ?, ?)",
+                params![product_id, change_type, difference.abs(), previous_stock, new_stock],
+            )?;
+
+            count += 1;
+        }
+
+        tx.commit()?;
+        Ok(count)
     }
 }

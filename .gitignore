@@ -28,3 +28,6 @@ src-tauri/target/
 
 # Claude
 .claude/
+
+# pnpm
+.pnpm-store/

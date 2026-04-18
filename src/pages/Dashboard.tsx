@@ -1,205 +1,260 @@
 import { useEffect, useState } from 'react';
-import { Card, Row, Col, Statistic, Button, List, Tag } from 'antd';
-import { AppstoreOutlined, DollarOutlined, ShoppingCartOutlined, RiseOutlined, ReloadOutlined, WarningOutlined, ClockCircleOutlined } from '@ant-design/icons';
 import { invoke } from '@tauri-apps/api/core';
 import SalesTrend from '../components/SalesTrend';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { 
+  Inbox, 
+  ShoppingCart, 
+  LayoutGrid, 
+  Wallet, 
+  AlertTriangle, 
+  Plus, 
+  History,
+  Loader2
+} from 'lucide-react';
 
-interface Statistics {
-  product_count: number;
-  total_stock: number;
-  total_value: number;
-  monthly_sales: number;
-  monthly_profit: number;
+interface DashboardStats {
+  total_products: number;
+  total_stock_value: number;
+  today_inbound: number;
+  today_outbound: number;
+  total_receivables: number;
+  total_payables: number;
+}
+
+interface SlowProduct {
+  id: number;
+  name: string;
+  stock: number;
+  days_since_last_sale: number;
 }
 
 interface LowStockProduct {
   id: number;
   name: string;
-  category: string;
-  unit: string;
+  category: string | null;
   stock: number;
+  min_stock: number | null;
 }
 
-interface SlowMovingProduct {
-  id: number;
-  name: string;
-  category: string;
-  stock: number;
-  unit: string;
-  last_outbound: string;
+function StatisticCard({ title, value, icon, loading, prefix = '', precision = 0, valueClass = '' }: { title: string, value: string | number, icon?: React.ReactNode, loading?: boolean, prefix?: string, precision?: number, valueClass?: string }) {
+  const displayValue = typeof value === 'number' ? value.toFixed(precision) : value;
+  return (
+    <Card>
+      <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+        <CardTitle className="text-sm font-medium">
+          {title}
+        </CardTitle>
+        {icon && <div className="text-muted-foreground">{icon}</div>}
+      </CardHeader>
+      <CardContent>
+        {loading ? (
+          <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+        ) : (
+          <div className={`text-2xl font-bold ${valueClass}`}>
+            {prefix}{displayValue}
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
 }
 
-const Dashboard = () => {
-  const [stats, setStats] = useState<Statistics>({
-    product_count: 0,
-    total_stock: 0,
-    total_value: 0,
-    monthly_sales: 0,
-    monthly_profit: 0,
-  });
+const Dashboard = ({ onChangeMenu }: { onChangeMenu?: (key: string) => void }) => {
+  const [stats, setStats] = useState<DashboardStats | null>(null);
+  const [slowProducts, setSlowProducts] = useState<SlowProduct[]>([]);
   const [lowStockProducts, setLowStockProducts] = useState<LowStockProduct[]>([]);
-  const [slowMovingProducts, setSlowMovingProducts] = useState<SlowMovingProduct[]>([]);
   const [loading, setLoading] = useState(true);
+  const [lowStockLoading, setLowStockLoading] = useState(false);
 
   useEffect(() => {
-    loadStatistics();
-    loadLowStockProducts();
-    loadSlowMovingProducts();
+    loadData();
+    loadLowStock();
   }, []);
 
-  const loadStatistics = async () => {
+  const loadData = async () => {
     setLoading(true);
     try {
-      const data = await invoke<Statistics>('get_statistics');
-      setStats(data);
+      const [statsData, slowData] = await Promise.all([
+        invoke<DashboardStats>('get_dashboard_stats'),
+        invoke<SlowProduct[]>('get_slow_moving_products', { days: 30, limit: 5 })
+      ]);
+      setStats(statsData);
+      setSlowProducts(slowData);
     } catch (error) {
-      console.error('Failed to load statistics:', error);
+      console.error('Failed to load dashboard data:', error);
     } finally {
       setLoading(false);
     }
   };
 
-  const loadLowStockProducts = async () => {
+  const loadLowStock = async () => {
+    setLowStockLoading(true);
     try {
       const data = await invoke<LowStockProduct[]>('get_low_stock_products');
       setLowStockProducts(data);
     } catch (error) {
-      console.error('Failed to load low stock products:', error);
-    }
-  };
-
-  const loadSlowMovingProducts = async () => {
-    try {
-      const data = await invoke<SlowMovingProduct[]>('get_slow_moving_products', { days: 30 });
-      setSlowMovingProducts(data);
-    } catch (error) {
-      console.error('Failed to load slow moving products:', error);
+      console.error('Failed to load low stock:', error);
+    } finally {
+      setLowStockLoading(false);
     }
   };
 
   return (
-    <div>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-        <h2>数据概览</h2>
-        <Button icon={<ReloadOutlined />} onClick={() => { loadStatistics(); loadLowStockProducts(); loadSlowMovingProducts(); }} loading={loading}>
-          刷新
-        </Button>
+    <div className="space-y-6 pb-6">
+      {/* Top Stats */}
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+        <StatisticCard
+          title="在售商品种类"
+          value={stats?.total_products || 0}
+          icon={<LayoutGrid className="h-4 w-4 text-blue-500" />}
+          loading={loading}
+        />
+        <StatisticCard
+          title="今日入库单数"
+          value={stats?.today_inbound || 0}
+          icon={<Inbox className="h-4 w-4 text-green-500" />}
+          loading={loading}
+        />
+        <StatisticCard
+          title="今日出库单数"
+          value={stats?.today_outbound || 0}
+          icon={<ShoppingCart className="h-4 w-4 text-orange-500" />}
+          loading={loading}
+        />
+        <StatisticCard
+          title="库存总成本(元)"
+          value={stats?.total_stock_value || 0}
+          precision={2}
+          icon={<Wallet className="h-4 w-4 text-purple-500" />}
+          loading={loading}
+        />
       </div>
-      <Row gutter={[16, 16]}>
-        <Col xs={24} sm={12} md={8}>
-          <Card loading={loading}>
-            <Statistic
-              title="商品总数"
-              value={stats.product_count}
-              prefix={<AppstoreOutlined />}
-              suffix="个"
-            />
-          </Card>
-        </Col>
-        <Col xs={24} sm={12} md={8}>
-          <Card loading={loading}>
-            <Statistic
-              title="库存总数"
-              value={stats.total_stock}
-              prefix={<ShoppingCartOutlined />}
-              suffix="件"
-            />
-          </Card>
-        </Col>
-        <Col xs={24} sm={12} md={8}>
-          <Card loading={loading}>
-            <Statistic
-              title="库存总价值"
-              value={stats.total_value}
-              prefix={<DollarOutlined />}
-              precision={2}
-              suffix="元"
-            />
-          </Card>
-        </Col>
-        <Col xs={24} sm={12} md={12}>
-          <Card loading={loading}>
-            <Statistic
-              title="本月销售额"
-              value={stats.monthly_sales}
-              prefix={<DollarOutlined />}
-              precision={2}
-              suffix="元"
-              valueStyle={{ color: '#3f8600' }}
-            />
-          </Card>
-        </Col>
-        <Col xs={24} sm={12} md={12}>
-          <Card loading={loading}>
-            <Statistic
-              title="本月利润"
-              value={stats.monthly_profit}
-              prefix={<RiseOutlined />}
-              precision={2}
-              suffix="元"
-              valueStyle={{ color: '#cf1322' }}
-            />
-          </Card>
-        </Col>
-      </Row>
-      {lowStockProducts.length > 0 && (
-        <Card
-          title={
-            <span>
-              <WarningOutlined style={{ color: '#cf1322', marginRight: 8 }} />
-              库存预警
-              <Tag color="red" style={{ marginLeft: 8 }}>{lowStockProducts.length} 个商品</Tag>
-            </span>
-          }
-          style={{ marginTop: 16 }}
-          styles={{ body: { padding: 0 } }}
-        >
-          <List
-            size="small"
-            dataSource={lowStockProducts}
-            renderItem={(item) => (
-              <List.Item>
-                <List.Item.Meta
-                  title={item.name}
-                  description={item.category ? `分类: ${item.category}` : ''}
-                />
-                <Tag color="red">库存: {item.stock} {item.unit}</Tag>
-              </List.Item>
-            )}
-          />
+
+      {/* Middle Section: Trend and Quick Actions */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+        <Card className="lg:col-span-2">
+          <CardHeader>
+            <CardTitle>近30天销售趋势</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <SalesTrend />
+          </CardContent>
         </Card>
-      )}
-      <SalesTrend />
-      {slowMovingProducts.length > 0 && (
-        <Card
-          title={
-            <span>
-              <ClockCircleOutlined style={{ color: '#faad14', marginRight: 8 }} />
-              滞销商品预警
-              <Tag color="orange" style={{ marginLeft: 8 }}>{slowMovingProducts.length} 个商品</Tag>
-            </span>
-          }
-          style={{ marginTop: 16 }}
-          styles={{ body: { padding: 0 } }}
-        >
-          <List
-            size="small"
-            dataSource={slowMovingProducts}
-            renderItem={(item) => (
-              <List.Item>
-                <List.Item.Meta
-                  title={item.name}
-                  description={item.category ? `分类: ${item.category}` : ''}
-                />
-                <div style={{ textAlign: 'right' }}>
-                  <div><Tag color="orange">库存: {item.stock} {item.unit}</Tag></div>
-                  <div style={{ fontSize: 12, color: '#999', marginTop: 4 }}>最后出库: {item.last_outbound}</div>
-                </div>
-              </List.Item>
-            )}
-          />
+        <Card>
+          <CardHeader>
+            <CardTitle>快捷操作</CardTitle>
+          </CardHeader>
+          <CardContent className="flex flex-col gap-4">
+            <Button size="lg" className="w-full" onClick={() => onChangeMenu?.('outbound')}>
+              <ShoppingCart className="mr-2 h-5 w-5" /> 新建出库单
+            </Button>
+            <Button size="lg" variant="secondary" className="w-full" onClick={() => onChangeMenu?.('inbound')}>
+              <Inbox className="mr-2 h-5 w-5" /> 新建入库单
+            </Button>
+            <Button size="lg" variant="outline" className="w-full" onClick={() => onChangeMenu?.('products')}>
+              <Plus className="mr-2 h-5 w-5" /> 新增商品
+            </Button>
+            <Button size="lg" variant="ghost" className="w-full" onClick={() => onChangeMenu?.('inventory-logs')}>
+              <History className="mr-2 h-5 w-5" /> 查库存流水
+            </Button>
+          </CardContent>
         </Card>
-      )}
+      </div>
+
+      {/* Financials */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <StatisticCard
+          title="客户总欠款 (应收)"
+          value={stats?.total_receivables || 0}
+          prefix="¥ "
+          precision={2}
+          valueClass="text-blue-600"
+          loading={loading}
+        />
+        <StatisticCard
+          title="欠供应商款 (应付)"
+          value={stats?.total_payables || 0}
+          prefix="¥ "
+          precision={2}
+          valueClass="text-red-600"
+          loading={loading}
+        />
+      </div>
+
+      {/* Bottom Section: Tables */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center text-red-600">
+              <AlertTriangle className="mr-2 h-5 w-5" />
+              库存预警 (需要补货)
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            {lowStockLoading ? (
+              <div className="flex justify-center p-4"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>
+            ) : (
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>商品名称</TableHead>
+                    <TableHead>分类</TableHead>
+                    <TableHead>当前库存</TableHead>
+                    <TableHead>安全库存</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {lowStockProducts.length === 0 ? (
+                    <TableRow><TableCell colSpan={4} className="text-center text-muted-foreground">暂无预警商品</TableCell></TableRow>
+                  ) : lowStockProducts.map(p => (
+                    <TableRow key={p.id}>
+                      <TableCell>{p.name}</TableCell>
+                      <TableCell>{p.category || '-'}</TableCell>
+                      <TableCell className="font-bold text-red-600">{p.stock}</TableCell>
+                      <TableCell>{p.min_stock || '-'}</TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            )}
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>滞销预警 (近30天未出库)</CardTitle>
+          </CardHeader>
+          <CardContent>
+            {loading ? (
+              <div className="flex justify-center p-4"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>
+            ) : (
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>商品名称</TableHead>
+                    <TableHead>当前库存</TableHead>
+                    <TableHead>未出库天数</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {slowProducts.length === 0 ? (
+                    <TableRow><TableCell colSpan={3} className="text-center text-muted-foreground">暂无滞销商品</TableCell></TableRow>
+                  ) : slowProducts.map(p => (
+                    <TableRow key={p.id}>
+                      <TableCell>{p.name}</TableCell>
+                      <TableCell>{p.stock}</TableCell>
+                      <TableCell className="text-yellow-600">{p.days_since_last_sale}天</TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            )}
+          </CardContent>
+        </Card>
+      </div>
     </div>
   );
 };

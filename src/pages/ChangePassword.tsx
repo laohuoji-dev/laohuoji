@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Form, Input, Button, Card, message } from 'antd';
 import { LockOutlined } from '@ant-design/icons';
 import { invoke } from '@tauri-apps/api/core';
+import { getTauriErrorMessage } from '../utils/tauriError';
 
 const ChangePassword = () => {
   const [loading, setLoading] = useState(false);
@@ -22,7 +23,7 @@ const ChangePassword = () => {
       message.success('密码修改成功');
       form.resetFields();
     } catch (error) {
-      message.error('操作失败');
+      message.error(getTauriErrorMessage(error) || '操作失败');
       console.error(error);
     } finally {
       setLoading(false);

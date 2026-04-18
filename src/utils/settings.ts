@@ -1,0 +1,101 @@
+import { invoke } from '@tauri-apps/api/core';
+
+export interface Category {
+  id: number;
+  name: string;
+  created_at: string;
+}
+
+export interface Unit {
+  id: number;
+  name: string;
+  created_at: string;
+}
+
+export interface Partner {
+  id: number;
+  name: string;
+  contact?: string;
+  phone?: string;
+  balance?: number;
+  created_at: string;
+}
+
+export interface CompanyInfo {
+  name: string;
+  phone: string;
+  address: string;
+}
+
+export interface AutoBackupConfig {
+  enabled: boolean;
+  days: number;
+}
+
+export const getLowStockThreshold = async (): Promise<number> => {
+  try {
+    return await invoke<number>('get_low_stock_threshold');
+  } catch (error) {
+    console.error('获取预警阈值失败:', error);
+    return 10; // 默认值
+  }
+};
+
+export const setLowStockThreshold = async (threshold: number): Promise<void> => {
+  await invoke('set_low_stock_threshold', { threshold });
+};
+
+// 公司信息 API
+export const getCompanyInfo = async (): Promise<CompanyInfo> => {
+  try {
+    return await invoke<CompanyInfo>('get_company_info');
+  } catch (error) {
+    console.error('获取公司信息失败:', error);
+    return { name: '', phone: '', address: '' };
+  }
+};
+
+export const setCompanyInfo = async (info: CompanyInfo): Promise<void> => {
+  await invoke('set_company_info', { ...info });
+};
+
+// 自动备份配置 API
+export const getAutoBackupConfig = async (): Promise<AutoBackupConfig> => {
+  try {
+    return await invoke<AutoBackupConfig>('get_auto_backup_config');
+  } catch (error) {
+    console.error('获取自动备份配置失败:', error);
+    return { enabled: true, days: 7 };
+  }
+};
+
+export const setAutoBackupConfig = async (enabled: boolean, days: number): Promise<void> => {
+  await invoke('set_auto_backup_config', { enabled, days });
+};
+
+// 分类管理 API
+export const getCategories = async (): Promise<Category[]> => {
+  return await invoke<Category[]>('get_categories');
+};
+
+export const addCategory = async (name: string): Promise<number> => {
+  return await invoke<number>('add_category', { name });
+};
+
+export const deleteCategory = async (id: number): Promise<void> => {
+  await invoke('delete_category', { id });
+};
+
+// 单位管理 API
+export const getUnits = async (): Promise<Unit[]> => {
+  return await invoke<Unit[]>('get_units');
+};
+
+export const addUnit = async (name: string): Promise<number> => {
+  return await invoke<number>('add_unit', { name });
+};
+
+export const deleteUnit = async (id: number): Promise<void> => {
+  await invoke('delete_unit', { id });
+};
+

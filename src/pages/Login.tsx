@@ -1,7 +1,12 @@
 import { useState, useEffect } from 'react';
-import { Form, Input, Button, Card, message } from 'antd';
-import { LockOutlined } from '@ant-design/icons';
 import { invoke } from '@tauri-apps/api/core';
+import { getTauriErrorMessage } from '../utils/tauriError';
+import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
+import { Input } from '@/components/ui/input';
+import { Button } from '@/components/ui/button';
+import { Label } from '@/components/ui/label';
+import { Lock, Loader2 } from 'lucide-react';
+import { toast } from 'sonner';
 
 interface LoginProps {
   onLogin: () => void;
@@ -10,7 +15,8 @@ interface LoginProps {
 const Login = ({ onLogin }: LoginProps) => {
   const [loading, setLoading] = useState(false);
   const [isFirstTime, setIsFirstTime] = useState(false);
-  const [form] = Form.useForm();
+  const [password, setPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
 
   // 检查是否首次使用
   useEffect(() => {
@@ -21,31 +27,39 @@ const Login = ({ onLogin }: LoginProps) => {
       .catch(() => {});
   }, []);
 
-  const handleSubmit = async (values: { password: string; confirmPassword?: string }) => {
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    
+    if (!password) {
+      toast.error('请输入密码');
+      return;
+    }
+
     setLoading(true);
 
     try {
       if (isFirstTime) {
         // 首次设置密码
-        if (values.password !== values.confirmPassword) {
-          message.error('两次密码输入不一致');
+        if (password !== confirmPassword) {
+          toast.error('两次密码输入不一致');
+          setLoading(false);
           return;
         }
-        await invoke('setup_password', { password: values.password });
-        message.success('密码设置成功');
+        await invoke('setup_password', { password });
+        toast.success('密码设置成功');
         onLogin();
       } else {
         // 验证密码
-        const valid = await invoke<boolean>('verify_password', { password: values.password });
+        const valid = await invoke<boolean>('verify_password', { password });
         if (valid) {
-          message.success('登录成功');
+          toast.success('登录成功');
           onLogin();
         } else {
-          message.error('密码错误');
+          toast.error('密码错误');
         }
       }
     } catch (error) {
-      message.error('操作失败');
+      toast.error(getTauriErrorMessage(error) || '操作失败');
       console.error(error);
     } finally {
       setLoading(false);
@@ -53,59 +67,69 @@ const Login = ({ onLogin }: LoginProps) => {
   };
 
   return (
-    <div style={{
-      display: 'flex',
-      justifyContent: 'center',
-      alignItems: 'center',
-      height: '100vh',
-      background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)'
-    }}>
-      <Card
-        title={isFirstTime ? '设置管理员密码' : '进销存系统'}
-        style={{ width: 400, boxShadow: '0 4px 12px rgba(0,0,0,0.15)' }}
-      >
-        <Form form={form} onFinish={handleSubmit} autoComplete="off">
-          <Form.Item
-            name="password"
-            rules={[{ required: true, message: '请输入密码' }]}
-          >
-            <Input.Password
-              prefix={<LockOutlined />}
-              placeholder={isFirstTime ? '设置密码' : '请输入密码'}
-              size="large"
-            />
-          </Form.Item>
+    <div className="flex min-h-screen items-center justify-center bg-gradient-to-br from-indigo-500 to-purple-700 p-4">
+      <Card className="w-full max-w-md shadow-2xl border-none">
+        <CardHeader className="space-y-2 text-center pb-6">
+          <div className="mx-auto bg-primary/10 w-12 h-12 rounded-full flex items-center justify-center mb-2">
+            <Lock className="h-6 w-6 text-primary" />
+          </div>
+          <CardTitle className="text-2xl font-bold tracking-tight">
+            {isFirstTime ? '设置管理员密码' : '进销存系统'}
+          </CardTitle>
+          <CardDescription>
+            {isFirstTime ? '为了您的数据安全，请设置一个初始密码' : '请输入管理员密码以继续'}
+          </CardDescription>
+        </CardHeader>
+        
+        <form onSubmit={handleSubmit}>
+          <CardContent className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="password">密码</Label>
+              <div className="relative">
+                <Lock className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
+                <Input
+                  id="password"
+                  type="password"
+                  placeholder={isFirstTime ? '设置密码' : '请输入密码'}
+                  className="pl-10"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  disabled={loading}
+                  autoFocus
+                />
+              </div>
+            </div>
 
-          {isFirstTime && (
-            <Form.Item
-              name="confirmPassword"
-              dependencies={['password']}
-              rules={[
-                { required: true, message: '请确认密码' },
-                ({ getFieldValue }) => ({
-                  validator(_, value) {
-                    if (!value || getFieldValue('password') === value) {
-                      return Promise.resolve();
-                    }
-                    return Promise.reject(new Error('两次密码输入不一致'));
-                  },
-                }),
-              ]}
+            {isFirstTime && (
+              <div className="space-y-2">
+                <Label htmlFor="confirmPassword">确认密码</Label>
+                <div className="relative">
+                  <Lock className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
+                  <Input
+                    id="confirmPassword"
+                    type="password"
+                    placeholder="请再次输入密码"
+                    className="pl-10"
+                    value={confirmPassword}
+                    onChange={(e) => setConfirmPassword(e.target.value)}
+                    disabled={loading}
+                  />
+                </div>
+              </div>
+            )}
+          </CardContent>
+          <CardFooter>
+            <Button 
+              type="submit" 
+              className="w-full" 
+              size="lg" 
+              disabled={loading}
             >
-              <Input.Password
-                prefix={<LockOutlined />}
-                placeholder="确认密码"
-                size="large"
-              />
-            </Form.Item>
-          )}
-
-          <Form.Item>
-            <Button type="primary" htmlType="submit" block size="large" loading={loading}>
-              {isFirstTime ? '设置密码' : '登录'}
+              {loading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              {isFirstTime ? '设置并登录' : '登录系统'}
             </Button>
-          </Form.Item>
-        </Form>
+          </CardFooter>
+        </form>
       </Card>
     </div>
   );
