@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
-import { Card, Spin } from 'antd';
 import { invoke } from '@tauri-apps/api/core';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Loader2 } from 'lucide-react';
 
 interface TrendDay {
   date: string;
@@ -35,27 +36,25 @@ const SalesTrend = () => {
   const renderBarChart = (trendData: TrendDay[], color: string, label: string) => {
     const maxAmount = Math.max(...trendData.map(d => d.amount), 1);
     return (
-      <div style={{ flex: 1 }}>
-        <div style={{ fontSize: 12, color: '#666', marginBottom: 8, textAlign: 'center' }}>{label}</div>
-        <div style={{ display: 'flex', alignItems: 'flex-end', gap: 4, height: 120 }}>
+      <div className="flex-1">
+        <div className="text-xs text-muted-foreground mb-2 text-center">{label}</div>
+        <div className="flex items-end gap-1 h-32">
           {trendData.map((day, i) => {
             const height = maxAmount > 0 ? (day.amount / maxAmount) * 100 : 0;
             return (
-              <div key={i} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-                <div style={{ fontSize: 10, color: '#999', marginBottom: 2 }}>
+              <div key={i} className="flex-1 flex flex-col items-center">
+                <div className="text-[10px] text-muted-foreground mb-0.5">
                   {day.amount > 0 ? day.amount.toFixed(0) : ''}
                 </div>
                 <div
+                  className="w-full rounded-t-sm transition-all duration-300"
                   style={{
-                    width: '100%',
-                    height: Math.max(height, 2),
+                    height: `${Math.max(height, 2)}%`,
                     backgroundColor: color,
-                    borderRadius: '2px 2px 0 0',
-                    minHeight: 2,
-                    transition: 'height 0.3s',
+                    minHeight: '2px',
                   }}
                 />
-                <div style={{ fontSize: 9, color: '#999', marginTop: 4, textAlign: 'center' }}>
+                <div className="text-[9px] text-muted-foreground mt-1 text-center truncate w-full">
                   {day.date.slice(5)}
                 </div>
               </div>
@@ -67,17 +66,24 @@ const SalesTrend = () => {
   };
 
   return (
-    <Card title="销售趋势（近7天）" loading={loading} style={{ marginTop: 16 }}>
-      {loading ? (
-        <Spin />
-      ) : data ? (
-        <div style={{ display: 'flex', gap: 24 }}>
-          {renderBarChart(data.daily, '#1890ff', '本月')}
-          {renderBarChart(data.last_period_daily, '#faad14', '上月同期')}
-        </div>
-      ) : (
-        <div style={{ textAlign: 'center', color: '#999' }}>暂无数据</div>
-      )}
+    <Card className="mt-4 border-none shadow-none">
+      <CardHeader className="px-0 pt-0">
+        <CardTitle className="text-base font-medium">销售趋势（近7天）</CardTitle>
+      </CardHeader>
+      <CardContent className="px-0 pb-0">
+        {loading ? (
+          <div className="flex justify-center items-center h-32">
+            <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+          </div>
+        ) : data ? (
+          <div className="flex gap-6">
+            {renderBarChart(data.daily, '#3b82f6', '本期')}
+            {renderBarChart(data.last_period_daily, '#f59e0b', '上期同期')}
+          </div>
+        ) : (
+          <div className="text-center text-muted-foreground h-32 flex items-center justify-center">暂无数据</div>
+        )}
+      </CardContent>
     </Card>
   );
 };
