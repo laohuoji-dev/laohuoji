@@ -1,13 +1,69 @@
-import { useEffect, useState } from 'react';
-import { Table, Button, Modal, Form, Input, InputNumber, Space, message, Popconfirm, Select, Tooltip, Tag } from 'antd';
-import { PlusOutlined, EditOutlined, DeleteOutlined, SearchOutlined, QuestionCircleOutlined, DownloadOutlined, UploadOutlined } from '@ant-design/icons';
+import { useEffect, useState, useMemo } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { save, open } from '@tauri-apps/plugin-dialog';
 import { writeFile, readFile } from '@tauri-apps/plugin-fs';
 import * as XLSX from 'xlsx';
+import { z } from 'zod';
+import { useForm } from 'react-hook-form';
+import { zodResolver } from '@hookform/resolvers/zod';
+import {
+  flexRender,
+  getCoreRowModel,
+  getPaginationRowModel,
+  useReactTable,
+} from '@tanstack/react-table';
+
 import { getFirstLetter, toPinyin } from '../utils/pinyin';
 import { getTauriAppError, getTauriErrorMessage } from '../utils/tauriError';
 import { getLowStockThreshold, getCategories, getUnits, Category, Unit } from '../utils/settings';
+
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+} from '@/components/ui/dialog';
+import {
+  Form,
+  FormControl,
+  FormField,
+  FormItem,
+  FormLabel,
+  FormMessage,
+} from '@/components/ui/form';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from '@/components/ui/alert-dialog';
+import { Badge } from '@/components/ui/badge';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
+import { toast } from 'sonner';
+import { Plus, Search, Upload, Download, Edit, Trash2, HelpCircle, ChevronLeft, ChevronRight, Loader2 } from 'lucide-react';
 
 interface Product {
   id: number;
@@ -24,13 +80,19 @@ interface Product {
   updated_at: string;
 }
 
-// interface Suggestion {
-//   name: string;
-//   category: string;
-//   unit: string;
-//   cost_price: number;
-//   sell_price: number;
-// }
+const formSchema = z.object({
+  name: z.string().min(1, '请输入商品名称'),
+  barcode: z.string().optional(),
+  category: z.string().min(1, '请选择分类'),
+  unit: z.string().min(1, '请选择单位'),
+  cost_price: z.coerce.number().min(0, '请输入有效的成本价'),
+  sell_price: z.coerce.number().min(0, '请输入有效的销售价'),
+  stock: z.coerce.number().min(0, '请输入有效的初始库存'),
+  min_stock: z.coerce.number().min(0, '请输入有效的安全库存').default(0),
+  status: z.string().min(1, '请选择状态'),
+});
+
+type FormValues = z.infer<typeof formSchema>;
 
 const Products = () => {
   const [products, setProducts] = useState<Product[]>([]);
@@ -42,7 +104,21 @@ const Products = () => {
   const [lowStockThreshold, setLowStockThreshold] = useState<number>(10);
   const [categories, setCategories] = useState<Category[]>([]);
   const [units, setUnits] = useState<Unit[]>([]);
-  const [form] = Form.useForm();
+
+  const form = useForm<FormValues>({
+    resolver: zodResolver(formSchema) as any,
+    defaultValues: {
+      name: '',
+      barcode: '',
+      category: '',
+      unit: '',
+      cost_price: 0,
+      sell_price: 0,
+      stock: 0,
+      min_stock: 0,
+      status: 'ACTIVE',
+    },
+  });
 
   useEffect(() => {
     loadProducts();
@@ -70,14 +146,11 @@ const Products = () => {
     } else {
       const searchLower = searchText.toLowerCase();
       const filtered = products.filter(p => {
-        // Match original text
         if (p.name.toLowerCase().includes(searchLower)) return true;
         if (p.barcode && p.barcode.toLowerCase().includes(searchLower)) return true;
         if (p.category && p.category.toLowerCase().includes(searchLower)) return true;
-        // Match pinyin first letter
         if (getFirstLetter(p.name).includes(searchLower)) return true;
         if (p.category && getFirstLetter(p.category).includes(searchLower)) return true;
-        // Match full pinyin
         if (toPinyin(p.name).includes(searchLower)) return true;
         if (p.category && toPinyin(p.category).includes(searchLower)) return true;
         return false;
@@ -92,7 +165,7 @@ const Products = () => {
       const data = await invoke<Product[]>('get_products');
       setProducts(data);
     } catch (error) {
-      message.error(getTauriErrorMessage(error) || '加载商品列表失败');
+      toast.error(getTauriErrorMessage(error) || '加载商品列表失败');
       console.error(error);
     } finally {
       setLoading(false);
@@ -101,52 +174,68 @@ const Products = () => {
 
   const handleAdd = () => {
     setEditingProduct(null);
-    form.resetFields();
-    form.setFieldsValue({ status: 'ACTIVE', min_stock: 0 });
+    form.reset({
+      name: '',
+      barcode: '',
+      category: '',
+      unit: '',
+      cost_price: 0,
+      sell_price: 0,
+      stock: 0,
+      min_stock: 0,
+      status: 'ACTIVE',
+    });
     setModalVisible(true);
   };
 
   const handleEdit = (record: Product) => {
     setEditingProduct(record);
-    form.setFieldsValue(record);
+    form.reset({
+      name: record.name,
+      barcode: record.barcode || '',
+      category: record.category,
+      unit: record.unit,
+      cost_price: record.cost_price,
+      sell_price: record.sell_price,
+      stock: record.stock,
+      min_stock: record.min_stock || 0,
+      status: record.status,
+    });
     setModalVisible(true);
   };
 
   const handleDelete = async (id: number) => {
     try {
       await invoke('delete_product', { id });
-      message.success('商品已删除');
+      toast.success('商品已删除');
       loadProducts();
     } catch (error: any) {
       const errObj = getTauriAppError(error);
       if (errObj && errObj.code === 'PRODUCT_HAS_HISTORY') {
-        Modal.warning({
-          title: '无法删除商品',
-          content: '该商品存在入库、出库或修改流水，无法直接删除以保证数据完整性。建议将其库存清零或修改名称进行归档。',
-        });
+        toast.error('无法删除：该商品存在历史流水，建议将其库存清零或修改状态为停售。');
       } else {
-        message.error(getTauriErrorMessage(error) || '删除商品失败');
+        toast.error(getTauriErrorMessage(error) || '删除商品失败');
       }
       console.error(error);
     }
   };
 
-  const handleSubmit = async (values: any) => {
+  const onSubmit = async (values: FormValues) => {
     try {
       if (editingProduct) {
         await invoke('update_product', {
           id: editingProduct.id,
           product: values,
         });
-        message.success('更新成功');
+        toast.success('更新成功');
       } else {
         await invoke('add_product', { product: values });
-        message.success('添加成功');
+        toast.success('添加成功');
       }
       setModalVisible(false);
       loadProducts();
     } catch (error) {
-      message.error(getTauriErrorMessage(error) || (editingProduct ? '更新失败' : '添加失败'));
+      toast.error(getTauriErrorMessage(error) || (editingProduct ? '更新失败' : '添加失败'));
       console.error(error);
     }
   };
@@ -161,9 +250,8 @@ const Products = () => {
 
       if (!filePath) return;
 
-      const hide = message.loading('正在导出数据...', 0);
+      const toastId = toast.loading('正在导出数据...');
 
-      // 准备导出数据
       const exportData = filteredProducts.map((p) => ({
         '商品ID': p.id,
         '条码': p.barcode || '',
@@ -179,8 +267,7 @@ const Products = () => {
 
       const wb = XLSX.utils.book_new();
       const ws = XLSX.utils.json_to_sheet(exportData);
-      
-      // 设置列宽
+
       ws['!cols'] = [
         { wch: 10 }, { wch: 15 }, { wch: 20 }, { wch: 15 },
         { wch: 8 }, { wch: 10 }, { wch: 10 }, { wch: 10 },
@@ -188,16 +275,15 @@ const Products = () => {
       ];
 
       XLSX.utils.book_append_sheet(wb, ws, '商品列表');
-      
-      // 写入文件
       const excelBuffer = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
       await writeFile(filePath, new Uint8Array(excelBuffer));
-      
-      hide();
-      message.success('导出成功');
+
+      toast.dismiss(toastId);
+      toast.success('导出成功');
     } catch (error) {
       console.error('导出失败:', error);
-      message.error(getTauriErrorMessage(error) || '导出失败');
+      toast.dismiss();
+      toast.error(getTauriErrorMessage(error) || '导出失败');
     }
   };
 
@@ -211,7 +297,7 @@ const Products = () => {
 
       if (!filePath) return;
 
-      const hide = message.loading('正在解析并导入数据...', 0);
+      const toastId = toast.loading('正在解析并导入数据...');
 
       try {
         const fileData = await readFile(filePath as string);
@@ -220,8 +306,8 @@ const Products = () => {
         const jsonData: any[] = XLSX.utils.sheet_to_json(firstSheet);
 
         if (jsonData.length === 0) {
-          hide();
-          message.warning('导入文件为空或无有效数据');
+          toast.dismiss(toastId);
+          toast.warning('导入文件为空或无有效数据');
           return;
         }
 
@@ -235,232 +321,400 @@ const Products = () => {
           stock: Number(row['当前库存'] || row['初始库存'] || row['stock'] || 0),
           min_stock: Number(row['安全库存'] || row['min_stock'] || 0),
           status: (row['状态'] === '停售' || row['status'] === 'INACTIVE') ? 'INACTIVE' : 'ACTIVE',
-        })).filter(p => p.name && p.unit); // 过滤掉必填项为空的行
+        })).filter(p => p.name && p.unit);
 
         if (importPayload.length === 0) {
-          hide();
-          message.warning('没有找到有效的商品数据，请检查列名是否为：商品名称、条码、分类、单位、成本价、销售价、初始库存、安全库存、状态');
+          toast.dismiss(toastId);
+          toast.warning('没有找到有效的商品数据，请检查列名');
           return;
         }
 
         const successCount = await invoke<number>('import_products', { products: importPayload });
-        
-        hide();
-        message.success(`成功导入 ${successCount} 条商品记录`);
-        
-        // 重新加载数据
+
+        toast.dismiss(toastId);
+        toast.success(`成功导入 ${successCount} 条商品记录`);
+
         loadProducts();
         loadSettings();
       } catch (error) {
-        hide();
+        toast.dismiss(toastId);
         console.error('导入处理失败:', error);
-        message.error(getTauriErrorMessage(error) || '导入失败，请检查文件格式');
+        toast.error(getTauriErrorMessage(error) || '导入失败，请检查文件格式');
       }
     } catch (error) {
       console.error('选择文件失败:', error);
     }
   };
 
-  const columns = [
-    { title: 'ID', dataIndex: 'id', width: 60 },
-    { title: '条码', dataIndex: 'barcode', width: 120 },
-    { title: '商品名称', dataIndex: 'name', width: 150 },
-    { title: '分类', dataIndex: 'category', width: 100 },
-    { title: '单位', dataIndex: 'unit', width: 80 },
-    {
-      title: '成本价',
-      dataIndex: 'cost_price',
-      width: 100,
-      render: (val: number) => `¥${val.toFixed(2)}`,
-    },
-    {
-      title: '销售价',
-      dataIndex: 'sell_price',
-      width: 100,
-      render: (val: number) => `¥${val.toFixed(2)}`,
-    },
-    {
-      title: '状态',
-      dataIndex: 'status',
-      width: 80,
-      render: (val: string) => (
-        <Tag color={val === 'ACTIVE' ? 'success' : 'default'}>
-          {val === 'ACTIVE' ? '在售' : '停售'}
-        </Tag>
-      ),
-    },
-    {
-      title: '库存',
-      dataIndex: 'stock',
-      width: 80,
-      render: (val: number, record: Product) => {
-        // 如果该商品设置了特定的安全库存，且大于0，则使用该特定值；否则使用全局阈值
-        const threshold = (record.min_stock && record.min_stock > 0) ? record.min_stock : lowStockThreshold;
-        return (
-          <span style={{ color: val < threshold ? '#cf1322' : '#3f8600' }}>
-            {val}
-          </span>
-        );
+  // Setup Table
+  const table = useReactTable({
+    data: filteredProducts,
+    columns: useMemo(() => [
+      { accessorKey: 'id', header: 'ID' },
+      { accessorKey: 'barcode', header: '条码', cell: (info: any) => info.getValue() || '-' },
+      { accessorKey: 'name', header: '商品名称' },
+      { accessorKey: 'category', header: '分类', cell: (info: any) => info.getValue() || '-' },
+      { accessorKey: 'unit', header: '单位' },
+      { 
+        accessorKey: 'cost_price', 
+        header: '成本价',
+        cell: (info: any) => `¥${info.getValue().toFixed(2)}`
+      },
+      { 
+        accessorKey: 'sell_price', 
+        header: '销售价',
+        cell: (info: any) => `¥${info.getValue().toFixed(2)}`
+      },
+      { 
+        accessorKey: 'status', 
+        header: '状态',
+        cell: (info: any) => {
+          const val = info.getValue();
+          return (
+            <Badge variant={val === 'ACTIVE' ? 'default' : 'secondary'} className={val === 'ACTIVE' ? 'bg-green-600 hover:bg-green-700' : ''}>
+              {val === 'ACTIVE' ? '在售' : '停售'}
+            </Badge>
+          );
+        }
+      },
+      { 
+        accessorKey: 'stock', 
+        header: '库存',
+        cell: (info: any) => {
+          const record = info.row.original;
+          const val = info.getValue();
+          const threshold = (record.min_stock && record.min_stock > 0) ? record.min_stock : lowStockThreshold;
+          const isLow = val < threshold;
+          return (
+            <span className={isLow ? 'text-red-600 font-bold' : 'text-green-600 font-medium'}>
+              {val}
+            </span>
+          );
+        }
+      },
+      {
+        id: 'actions',
+        header: '操作',
+        cell: (info: any) => {
+          const record = info.row.original;
+          return (
+            <div className="flex items-center gap-2">
+              <Button variant="ghost" size="sm" onClick={() => handleEdit(record)} className="h-8 px-2 text-blue-600 hover:text-blue-700 hover:bg-blue-50">
+                <Edit className="h-4 w-4 mr-1" /> 编辑
+              </Button>
+              <AlertDialog>
+                <AlertDialogTrigger asChild>
+                  <Button variant="ghost" size="sm" className="h-8 px-2 text-red-600 hover:text-red-700 hover:bg-red-50">
+                    <Trash2 className="h-4 w-4 mr-1" /> 删除
+                  </Button>
+                </AlertDialogTrigger>
+                <AlertDialogContent>
+                  <AlertDialogHeader>
+                    <AlertDialogTitle>确认删除</AlertDialogTitle>
+                    <AlertDialogDescription>
+                      确定要删除这个商品吗？如果商品已有流水记录，可能无法直接删除。
+                    </AlertDialogDescription>
+                  </AlertDialogHeader>
+                  <AlertDialogFooter>
+                    <AlertDialogCancel>取消</AlertDialogCancel>
+                    <AlertDialogAction onClick={() => handleDelete(record.id)} className="bg-red-600 hover:bg-red-700">
+                      确定删除
+                    </AlertDialogAction>
+                  </AlertDialogFooter>
+                </AlertDialogContent>
+              </AlertDialog>
+            </div>
+          );
+        }
+      }
+    ], [lowStockThreshold]),
+    getCoreRowModel: getCoreRowModel(),
+    getPaginationRowModel: getPaginationRowModel(),
+    initialState: {
+      pagination: {
+        pageSize: 10,
       },
     },
-    {
-      title: '操作',
-      key: 'action',
-      width: 150,
-      fixed: 'right' as const,
-      render: (_: any, record: Product) => (
-        <Space>
-          <Button
-            type="link"
-            icon={<EditOutlined />}
-            onClick={() => handleEdit(record)}
-          >
-            编辑
-          </Button>
-          <Popconfirm
-            title="确认删除"
-            description="确定要删除这个商品吗？"
-            onConfirm={() => handleDelete(record.id)}
-            okText="确定"
-            cancelText="取消"
-          >
-            <Button type="link" danger icon={<DeleteOutlined />}>
-              删除
-            </Button>
-          </Popconfirm>
-        </Space>
-      ),
-    },
-  ];
+  });
 
   return (
-    <div>
-      <div style={{ marginBottom: 16, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <h2>商品管理</h2>
-        <Space>
-          <Input
-            placeholder="搜索名称、条码、分类、拼音..."
-            prefix={<SearchOutlined />}
-            value={searchText}
-            onChange={(e) => setSearchText(e.target.value)}
-            style={{ width: 250 }}
-            allowClear
-          />
-          <Button type="primary" icon={<PlusOutlined />} onClick={handleAdd}>
-            添加商品
+    <div className="space-y-6 pb-8">
+      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+        <h2 className="text-2xl font-bold tracking-tight">商品管理</h2>
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="relative">
+            <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+            <Input
+              placeholder="搜索名称、条码、拼音..."
+              value={searchText}
+              onChange={(e) => setSearchText(e.target.value)}
+              className="pl-9 w-[250px]"
+            />
+          </div>
+          <Button onClick={handleAdd}>
+            <Plus className="mr-2 h-4 w-4" /> 添加商品
           </Button>
-          <Button icon={<UploadOutlined />} onClick={importFromExcel}>
-            导入商品
+          <Button variant="outline" onClick={importFromExcel}>
+            <Upload className="mr-2 h-4 w-4" /> 导入
           </Button>
-          <Button icon={<DownloadOutlined />} onClick={exportToExcel}>
-            导出商品
+          <Button variant="outline" onClick={exportToExcel}>
+            <Download className="mr-2 h-4 w-4" /> 导出
           </Button>
-        </Space>
+        </div>
       </div>
 
-      <Table
-        columns={columns}
-        dataSource={filteredProducts}
-        loading={loading}
-        rowKey="id"
-        scroll={{ x: 1000 }}
-        pagination={{ pageSize: 10 }}
-      />
+      <div className="rounded-md border bg-card">
+        <Table>
+          <TableHeader>
+            {table.getHeaderGroups().map((headerGroup) => (
+              <TableRow key={headerGroup.id}>
+                {headerGroup.headers.map((header) => (
+                  <TableHead key={header.id}>
+                    {header.isPlaceholder
+                      ? null
+                      : flexRender(
+                          header.column.columnDef.header,
+                          header.getContext()
+                        )}
+                  </TableHead>
+                ))}
+              </TableRow>
+            ))}
+          </TableHeader>
+          <TableBody>
+            {loading ? (
+              <TableRow>
+                <TableCell colSpan={10} className="h-24 text-center">
+                  <Loader2 className="h-6 w-6 animate-spin mx-auto text-muted-foreground" />
+                </TableCell>
+              </TableRow>
+            ) : table.getRowModel().rows?.length ? (
+              table.getRowModel().rows.map((row) => (
+                <TableRow
+                  key={row.id}
+                  data-state={row.getIsSelected() && "selected"}
+                >
+                  {row.getVisibleCells().map((cell) => (
+                    <TableCell key={cell.id} className="py-3">
+                      {flexRender(cell.column.columnDef.cell, cell.getContext())}
+                    </TableCell>
+                  ))}
+                </TableRow>
+              ))
+            ) : (
+              <TableRow>
+                <TableCell colSpan={10} className="h-24 text-center text-muted-foreground">
+                  暂无数据
+                </TableCell>
+              </TableRow>
+            )}
+          </TableBody>
+        </Table>
+        
+        {/* Pagination Controls */}
+        <div className="flex items-center justify-end space-x-2 py-4 px-4 border-t">
+          <div className="flex-1 text-sm text-muted-foreground">
+            共 {filteredProducts.length} 条记录
+          </div>
+          <div className="space-x-2 flex items-center">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => table.previousPage()}
+              disabled={!table.getCanPreviousPage()}
+            >
+              <ChevronLeft className="h-4 w-4" />
+            </Button>
+            <div className="text-sm font-medium">
+              第 {table.getState().pagination.pageIndex + 1} 页
+            </div>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => table.nextPage()}
+              disabled={!table.getCanNextPage()}
+            >
+              <ChevronRight className="h-4 w-4" />
+            </Button>
+          </div>
+        </div>
+      </div>
 
-      <Modal
-        title={editingProduct ? '编辑商品' : '添加商品'}
-        open={modalVisible}
-        onCancel={() => setModalVisible(false)}
-        onOk={() => form.submit()}
-        width={600}
-      >
-        <Form form={form} onFinish={handleSubmit} layout="vertical">
-          <Form.Item name="name" label="商品名称" rules={[{ required: true, message: '请输入商品名称' }]}>
-            <Input placeholder="请输入商品名称" />
-          </Form.Item>
-
-          <Form.Item
-            name="barcode"
-            label="商品条码"
-            tooltip="支持扫码枪直接录入，为空则仅靠名称识别"
-          >
-            <Input placeholder="选填，如: 6901234567890" />
-          </Form.Item>
-
-          <Form.Item
-            name="category"
-            label="分类"
-          >
-            <Select placeholder="请选择分类" allowClear>
-              {categories.map(c => (
-                <Select.Option key={c.id} value={c.name}>{c.name}</Select.Option>
-              ))}
-            </Select>
-          </Form.Item>
-
-          <Form.Item
-            name="unit"
-            label="单位"
-            rules={[{ required: true, message: '请选择单位' }]}
-          >
-            <Select placeholder="请选择单位">
-              {units.map(u => (
-                <Select.Option key={u.id} value={u.name}>{u.name}</Select.Option>
-              ))}
-            </Select>
-          </Form.Item>
-
-          <Form.Item
-            name="cost_price"
-            label="成本价"
-            rules={[{ required: true, message: '请输入成本价' }]}
-          >
-            <InputNumber
-              min={0}
-              precision={2}
-              style={{ width: '100%' }}
-              placeholder="请输入成本价"
-            />
-          </Form.Item>
-
-          <Form.Item
-            name="sell_price"
-            label="销售价"
-            rules={[{ required: true, message: '请输入销售价' }]}
-          >
-            <InputNumber
-              min={0}
-              precision={2}
-              style={{ width: '100%' }}
-              placeholder="请输入销售价"
-            />
-          </Form.Item>
-
-          <Form.Item
-            name="stock"
-            label="初始库存"
-            rules={[{ required: true, message: '请输入初始库存' }]}
-          >
-            <InputNumber
-              min={0}
-              style={{ width: '100%' }}
-              placeholder="请输入初始库存"
-            />
-          </Form.Item>
-
-          <Space style={{ display: 'flex', width: '100%' }}>
-            <Form.Item name="min_stock" label={<span>安全库存 <Tooltip title="当库存低于此值时触发预警，填0则使用全局配置"><QuestionCircleOutlined /></Tooltip></span>} style={{ flex: 1 }}>
-              <InputNumber min={0} style={{ width: '100%' }} placeholder="商品专属预警值" />
-            </Form.Item>
-            <Form.Item name="status" label="状态" rules={[{ required: true }]} style={{ flex: 1 }}>
-              <Select>
-                <Select.Option value="ACTIVE">在售</Select.Option>
-                <Select.Option value="INACTIVE">停售 (归档)</Select.Option>
-              </Select>
-            </Form.Item>
-          </Space>
-        </Form>
-      </Modal>
+      <Dialog open={modalVisible} onOpenChange={setModalVisible}>
+        <DialogContent className="sm:max-w-[600px]">
+          <DialogHeader>
+            <DialogTitle>{editingProduct ? '编辑商品' : '添加商品'}</DialogTitle>
+          </DialogHeader>
+          
+          <Form {...form}>
+            <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
+              <div className="grid grid-cols-2 gap-4">
+                <FormField
+                  control={form.control as any}
+                  name="name"
+                  render={({ field }) => (
+                    <FormItem className="col-span-2 sm:col-span-1">
+                      <FormLabel>商品名称</FormLabel>
+                      <FormControl>
+                        <Input placeholder="请输入商品名称" {...field} />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                <FormField
+                  control={form.control as any}
+                  name="barcode"
+                  render={({ field }) => (
+                    <FormItem className="col-span-2 sm:col-span-1">
+                      <FormLabel>商品条码</FormLabel>
+                      <FormControl>
+                        <Input placeholder="选填，如: 6901234567890" {...field} />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                <FormField
+                  control={form.control as any}
+                  name="category"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>分类</FormLabel>
+                      <Select onValueChange={field.onChange} value={field.value}>
+                        <FormControl>
+                          <SelectTrigger>
+                            <SelectValue placeholder="请选择分类" />
+                          </SelectTrigger>
+                        </FormControl>
+                        <SelectContent>
+                          {categories.map(c => (
+                            <SelectItem key={c.id} value={c.name}>{c.name}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                <FormField
+                  control={form.control as any}
+                  name="unit"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>单位</FormLabel>
+                      <Select onValueChange={field.onChange} value={field.value}>
+                        <FormControl>
+                          <SelectTrigger>
+                            <SelectValue placeholder="请选择单位" />
+                          </SelectTrigger>
+                        </FormControl>
+                        <SelectContent>
+                          {units.map(u => (
+                            <SelectItem key={u.id} value={u.name}>{u.name}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                <FormField
+                  control={form.control as any}
+                  name="cost_price"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>成本价</FormLabel>
+                      <FormControl>
+                        <Input type="number" step="0.01" min="0" placeholder="0.00" {...field} />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                <FormField
+                  control={form.control as any}
+                  name="sell_price"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>销售价</FormLabel>
+                      <FormControl>
+                        <Input type="number" step="0.01" min="0" placeholder="0.00" {...field} />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                <FormField
+                  control={form.control as any}
+                  name="stock"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>初始库存</FormLabel>
+                      <FormControl>
+                        <Input type="number" min="0" placeholder="0" {...field} />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                <FormField
+                  control={form.control as any}
+                  name="min_stock"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel className="flex items-center gap-1">
+                        安全库存
+                        <TooltipProvider>
+                          <Tooltip>
+                            <TooltipTrigger type="button" tabIndex={-1}>
+                              <HelpCircle className="h-3.5 w-3.5 text-muted-foreground" />
+                            </TooltipTrigger>
+                            <TooltipContent>
+                              <p>当库存低于此值时触发预警，填0则使用全局配置</p>
+                            </TooltipContent>
+                          </Tooltip>
+                        </TooltipProvider>
+                      </FormLabel>
+                      <FormControl>
+                        <Input type="number" min="0" placeholder="0" {...field} />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                <FormField
+                  control={form.control as any}
+                  name="status"
+                  render={({ field }) => (
+                    <FormItem className="col-span-2 sm:col-span-1">
+                      <FormLabel>状态</FormLabel>
+                      <Select onValueChange={field.onChange} value={field.value}>
+                        <FormControl>
+                          <SelectTrigger>
+                            <SelectValue placeholder="选择状态" />
+                          </SelectTrigger>
+                        </FormControl>
+                        <SelectContent>
+                          <SelectItem value="ACTIVE">在售</SelectItem>
+                          <SelectItem value="INACTIVE">停售 (归档)</SelectItem>
+                        </SelectContent>
+                      </Select>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+              </div>
+              <DialogFooter className="mt-6">
+                <Button type="button" variant="outline" onClick={() => setModalVisible(false)}>
+                  取消
+                </Button>
+                <Button type="submit">确定</Button>
+              </DialogFooter>
+            </form>
+          </Form>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };
