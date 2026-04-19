@@ -10,9 +10,57 @@ pub struct Database {
 impl Database {
     pub fn new(app_handle: &AppHandle) -> Result<Self, AppError> {
         let db_path = Self::get_db_path(app_handle)?;
-        let conn = Connection::open(db_path)?;
+
+        // 如果新路径没有数据库，尝试从旧路径迁移
+        if !db_path.exists() {
+            Self::migrate_from_old_identifier(&db_path)?;
+        }
+
+        let conn = Connection::open(db_path.clone())?;
         conn.execute_batch("PRAGMA foreign_keys = ON;")?;
         conn.busy_timeout(Duration::from_secs(5))?;
+
+        // 如果数据库存在但没有实际数据（只有空表），也尝试从旧库迁移
+        let needs_migration = {
+            let count: i64 = conn
+                .query_row("SELECT COUNT(*) FROM products", [], |row| row.get(0))
+                .unwrap_or(0);
+            count == 0
+        };
+        if needs_migration && !db_path.exists() {
+            // 已经在上面处理过了
+        }
+        if needs_migration && db_path.exists() {
+            let old_data_dir = dirs::data_local_dir()
+                .or_else(|| dirs::data_dir())
+                .map(|d| d.join("com.ubuntu.inventory-app"));
+            if let Some(old_db) = old_data_dir.map(|d| d.join("inventory.db")) {
+                if old_db.exists() {
+                    // 旧库有数据才迁移
+                    let old_has_data = Connection::open(&old_db)
+                        .and_then(|c| {
+                            c.query_row("SELECT COUNT(*) FROM products", [], |row| row.get::<_, i64>(0))
+                        })
+                        .unwrap_or(0);
+                    if old_has_data > 0 {
+                        drop(conn);
+                        std::fs::copy(&old_db, &db_path)?;
+                        let wal = old_db.with_extension("db-wal");
+                        let shm = old_db.with_extension("db-shm");
+                        if wal.exists() { let _ = std::fs::copy(&wal, db_path.with_extension("db-wal")); }
+                        if shm.exists() { let _ = std::fs::copy(&shm, db_path.with_extension("db-shm")); }
+                        println!("旧数据库数据已导入: {} 个商品", old_has_data);
+                        let conn = Connection::open(&db_path)?;
+                        conn.execute_batch("PRAGMA foreign_keys = ON;")?;
+                        conn.busy_timeout(Duration::from_secs(5))?;
+                        let db = Database { conn };
+                        db.migrate()?;
+                        db.try_auto_backup()?;
+                        return Ok(db);
+                    }
+                }
+            }
+        }
 
         let db = Database { conn };
         db.migrate()?;
@@ -28,6 +76,37 @@ impl Database {
 
         std::fs::create_dir_all(&app_data_dir)?;
         Ok(app_data_dir.join("inventory.db"))
+    }
+
+    /// 从旧 identifier (com.ubuntu.inventory-app) 迁移数据库到新路径
+    fn migrate_from_old_identifier(new_db_path: &std::path::Path) -> Result<(), AppError> {
+        let old_data_dir = dirs::data_local_dir()
+            .or_else(|| dirs::data_dir())
+            .map(|d| d.join("com.ubuntu.inventory-app"));
+
+        let Some(old_db_path) = old_data_dir.map(|d| d.join("inventory.db")) else {
+            return Ok(());
+        };
+
+        if old_db_path.exists() {
+            // 复制数据库文件（保留原始数据）
+            std::fs::copy(&old_db_path, new_db_path)?;
+            // 复制 WAL 和 SHM 文件（如果存在）
+            let wal = old_db_path.with_extension("db-wal");
+            let shm = old_db_path.with_extension("db-shm");
+            if wal.exists() {
+                let _ = std::fs::copy(&wal, new_db_path.with_extension("db-wal"));
+            }
+            if shm.exists() {
+                let _ = std::fs::copy(&shm, new_db_path.with_extension("db-shm"));
+            }
+            println!(
+                "数据库已从旧路径迁移: {:?} -> {:?}",
+                old_db_path, new_db_path
+            );
+        }
+
+        Ok(())
     }
 
     fn migrate(&self) -> Result<(), AppError> {
