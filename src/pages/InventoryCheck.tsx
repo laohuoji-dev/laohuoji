@@ -1,10 +1,24 @@
 import { useEffect, useState } from 'react';
-import { Table, Button, Space, InputNumber, message, Select, Typography, Card, Tag } from 'antd';
-import { PlusOutlined, SaveOutlined, ReloadOutlined } from '@ant-design/icons';
 import { invoke } from '@tauri-apps/api/core';
-import { getTauriErrorMessage } from '../utils/tauriError';
+import { Plus, Save, RefreshCw, Trash2, Check, ChevronsUpDown } from 'lucide-react';
+import { toast } from 'sonner';
 
-const { Title, Text } = Typography;
+import { getTauriErrorMessage } from '../utils/tauriError';
+import { Button } from '../components/ui/button';
+import { Card, CardContent } from '../components/ui/card';
+import { Input } from '../components/ui/input';
+import { Badge } from '../components/ui/badge';
+import { Popover, PopoverContent, PopoverTrigger } from '../components/ui/popover';
+import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '../components/ui/command';
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '../components/ui/table';
+import { cn } from '../lib/utils';
 
 interface Product {
   id: number;
@@ -20,7 +34,7 @@ interface Product {
 }
 
 interface CheckItem {
-  key: string; // 本地生成的唯一key
+  key: string;
   product_id?: number;
   product?: Product;
   actual_stock?: number;
@@ -29,8 +43,8 @@ interface CheckItem {
 const InventoryCheck = () => {
   const [products, setProducts] = useState<Product[]>([]);
   const [items, setItems] = useState<CheckItem[]>([]);
-  const [loading, setLoading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [openCombobox, setOpenCombobox] = useState<Record<string, boolean>>({});
 
   useEffect(() => {
     loadProducts();
@@ -38,15 +52,11 @@ const InventoryCheck = () => {
   }, []);
 
   const loadProducts = async () => {
-    setLoading(true);
     try {
       const data = await invoke<Product[]>('get_products');
-      // 盘点页面也可以展示停用的商品，防止旧商品需要清库，但为了体验，这里默认过滤停售，除非你想全盘点
       setProducts(data);
     } catch (error) {
-      message.error(getTauriErrorMessage(error) || '加载商品列表失败');
-    } finally {
-      setLoading(false);
+      toast.error(getTauriErrorMessage(error) || '加载商品列表失败');
     }
   };
 
@@ -65,7 +75,7 @@ const InventoryCheck = () => {
         if (field === 'product_id') {
           const product = products.find(p => p.id === value);
           newItem.product = product;
-          newItem.actual_stock = product?.stock; // 默认带出当前库存
+          newItem.actual_stock = product?.stock;
         }
         return newItem;
       }
@@ -74,27 +84,23 @@ const InventoryCheck = () => {
   };
 
   const handleBatchUpdate = async () => {
-    // 过滤掉无效行
     const validItems = items.filter(item => item.product_id && item.actual_stock !== undefined);
     
     if (validItems.length === 0) {
-      message.warning('没有有效的盘点数据');
+      toast.warning('没有有效的盘点数据');
       return;
     }
 
-    // 检查是否有重复盘点的商品
     const productIds = validItems.map(i => i.product_id);
     if (new Set(productIds).size !== productIds.length) {
-      message.error('列表中存在重复的商品，请合并后再提交');
+      toast.error('列表中存在重复的商品，请合并后再提交');
       return;
     }
 
-    // 筛选出真正有差异的行
     const changedItems = validItems.filter(item => item.actual_stock !== item.product?.stock);
     
     if (changedItems.length === 0) {
-      message.success('所有实盘数量与系统账面一致，无需更新');
-      // 清空并重新加载
+      toast.success('所有实盘数量与系统账面一致，无需更新');
       setItems([{ key: Date.now().toString() }]);
       return;
     }
@@ -108,128 +114,175 @@ const InventoryCheck = () => {
     setSubmitting(true);
     try {
       const count = await invoke<number>('batch_update_stock', { adjustments: payload });
-      message.success(`成功更新 ${count} 种商品的库存`);
+      toast.success(`成功更新 ${count} 种商品的库存`);
       
-      // 重新加载数据
       await loadProducts();
       setItems([{ key: Date.now().toString() }]);
     } catch (error) {
-      message.error(getTauriErrorMessage(error) || '盘点提交失败');
+      toast.error(getTauriErrorMessage(error) || '盘点提交失败');
     } finally {
       setSubmitting(false);
     }
   };
 
-  const columns = [
-    {
-      title: '商品',
-      dataIndex: 'product_id',
-      width: 300,
-      render: (value: any, record: CheckItem) => (
-        <Select
-          showSearch
-          style={{ width: '100%' }}
-          placeholder="请选择商品 (支持名称/条码拼音搜索)"
-          optionFilterProp="children"
-          value={value}
-          onChange={(val) => handleItemChange(record.key, 'product_id', val)}
-          filterOption={(input, option) => {
-            const p = products.find(p => p.id === option?.value);
-            if (!p) return false;
-            const searchStr = input.toLowerCase();
-            return !!((p.name?.toLowerCase().includes(searchStr)) || 
-                   (p.barcode?.toLowerCase().includes(searchStr)));
-          }}
-        >
-          {products.map(p => (
-            <Select.Option key={p.id} value={p.id} disabled={items.some(i => i.key !== record.key && i.product_id === p.id)}>
-              {p.name} {p.barcode ? `(${p.barcode})` : ''} {p.status === 'INACTIVE' ? '[停售]' : ''}
-            </Select.Option>
-          ))}
-        </Select>
-      ),
-    },
-    {
-      title: '账面库存',
-      key: 'system_stock',
-      width: 120,
-      render: (_: any, record: CheckItem) => (
-        <Text>{record.product?.stock ?? '-'}</Text>
-      ),
-    },
-    {
-      title: '实盘数量',
-      dataIndex: 'actual_stock',
-      width: 150,
-      render: (value: any, record: CheckItem) => (
-        <InputNumber
-          min={0}
-          style={{ width: '100%' }}
-          value={value}
-          onChange={(val) => handleItemChange(record.key, 'actual_stock', val)}
-          disabled={!record.product_id}
-        />
-      ),
-    },
-    {
-      title: '单位',
-      key: 'unit',
-      width: 80,
-      render: (_: any, record: CheckItem) => (
-        <Text>{record.product?.unit ?? '-'}</Text>
-      ),
-    },
-    {
-      title: '盈亏差异',
-      key: 'diff',
-      width: 120,
-      render: (_: any, record: CheckItem) => {
-        if (!record.product || record.actual_stock === undefined) return '-';
-        const diff = record.actual_stock - record.product.stock;
-        if (diff > 0) return <Tag color="green">盘盈 +{diff}</Tag>;
-        if (diff < 0) return <Tag color="red">盘亏 {diff}</Tag>;
-        return <Tag>正常</Tag>;
-      },
-    },
-    {
-      title: '操作',
-      key: 'action',
-      width: 100,
-      render: (_: any, record: CheckItem) => (
-        <Button type="link" danger onClick={() => handleRemoveRow(record.key)}>
-          移除
-        </Button>
-      ),
-    },
-  ];
-
   return (
-    <div>
-      <div style={{ marginBottom: 16, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <Title level={2} style={{ margin: 0 }}>库存盘点</Title>
-        <Space>
-          <Button icon={<ReloadOutlined />} onClick={loadProducts}>
+    <div className="space-y-6">
+      <div className="flex justify-between items-center">
+        <h2 className="text-2xl font-bold tracking-tight">库存盘点</h2>
+        <div className="flex gap-2">
+          <Button variant="outline" onClick={loadProducts}>
+            <RefreshCw className="mr-2 h-4 w-4" />
             刷新数据
           </Button>
-          <Button type="primary" icon={<SaveOutlined />} onClick={handleBatchUpdate} loading={submitting}>
+          <Button onClick={handleBatchUpdate} disabled={submitting}>
+            <Save className="mr-2 h-4 w-4" />
             提交盘点
           </Button>
-        </Space>
+        </div>
       </div>
 
       <Card>
-        <Table
-          dataSource={items}
-          columns={columns}
-          rowKey="key"
-          pagination={false}
-          loading={loading}
-          footer={() => (
-            <Button type="dashed" onClick={handleAddRow} icon={<PlusOutlined />} style={{ width: '100%' }}>
+        <CardContent className="p-0">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead className="w-[300px]">商品</TableHead>
+                <TableHead className="w-[120px]">账面库存</TableHead>
+                <TableHead className="w-[150px]">实盘数量</TableHead>
+                <TableHead className="w-[80px]">单位</TableHead>
+                <TableHead className="w-[120px]">盈亏差异</TableHead>
+                <TableHead className="w-[100px]">操作</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {items.map((record) => {
+                const diff = record.product && record.actual_stock !== undefined
+                  ? record.actual_stock - record.product.stock
+                  : null;
+
+                return (
+                  <TableRow key={record.key}>
+                    <TableCell>
+                      <Popover
+                        open={openCombobox[record.key]}
+                        onOpenChange={(open) => setOpenCombobox(prev => ({ ...prev, [record.key]: open }))}
+                      >
+                        <PopoverTrigger asChild>
+                          <Button
+                            variant="outline"
+                            role="combobox"
+                            className={cn(
+                              "w-full justify-between font-normal",
+                              !record.product_id && "text-muted-foreground"
+                            )}
+                          >
+                            {record.product_id
+                              ? (() => {
+                                  const p = products.find((p) => p.id === record.product_id);
+                                  return p ? `${p.name} ${p.barcode ? `(${p.barcode})` : ''}` : "请选择商品";
+                                })()
+                              : "请选择商品"}
+                            <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                          </Button>
+                        </PopoverTrigger>
+                        <PopoverContent className="w-[300px] p-0">
+                          <Command filter={(value, search) => {
+                            const p = products.find(p => p.id.toString() === value);
+                            if (!p) return 0;
+                            const s = search.toLowerCase();
+                            if (p.name.toLowerCase().includes(s) || (p.barcode && p.barcode.toLowerCase().includes(s))) {
+                              return 1;
+                            }
+                            return 0;
+                          }}>
+                            <CommandInput placeholder="搜索商品名称/条码..." />
+                            <CommandList>
+                              <CommandEmpty>未找到商品</CommandEmpty>
+                              <CommandGroup>
+                                {products.map((p) => {
+                                  const disabled = items.some(i => i.key !== record.key && i.product_id === p.id);
+                                  return (
+                                    <CommandItem
+                                      key={p.id}
+                                      value={p.id.toString()}
+                                      disabled={disabled}
+                                      onSelect={(currentValue) => {
+                                        handleItemChange(record.key, 'product_id', parseInt(currentValue));
+                                        setOpenCombobox(prev => ({ ...prev, [record.key]: false }));
+                                      }}
+                                    >
+                                      <Check
+                                        className={cn(
+                                          "mr-2 h-4 w-4",
+                                          record.product_id === p.id ? "opacity-100" : "opacity-0"
+                                        )}
+                                      />
+                                      <div className="flex flex-col">
+                                        <span>{p.name} {p.status === 'INACTIVE' ? <span className="text-destructive text-xs">[停售]</span> : ''}</span>
+                                        {p.barcode && <span className="text-xs text-muted-foreground">{p.barcode}</span>}
+                                      </div>
+                                    </CommandItem>
+                                  );
+                                })}
+                              </CommandGroup>
+                            </CommandList>
+                          </Command>
+                        </PopoverContent>
+                      </Popover>
+                    </TableCell>
+                    <TableCell>
+                      {record.product?.stock ?? '-'}
+                    </TableCell>
+                    <TableCell>
+                      <Input
+                        type="number"
+                        min="0"
+                        value={record.actual_stock ?? ''}
+                        onChange={(e) => {
+                          const val = e.target.value === '' ? undefined : Number(e.target.value);
+                          handleItemChange(record.key, 'actual_stock', val);
+                        }}
+                        disabled={!record.product_id}
+                        className="w-full"
+                      />
+                    </TableCell>
+                    <TableCell>
+                      {record.product?.unit ?? '-'}
+                    </TableCell>
+                    <TableCell>
+                      {!record.product || record.actual_stock === undefined ? '-' : (
+                        diff! > 0 ? <Badge variant="default" className="bg-green-500 hover:bg-green-600">盘盈 +{diff}</Badge> :
+                        diff! < 0 ? <Badge variant="destructive">盘亏 {diff}</Badge> :
+                        <Badge variant="secondary">正常</Badge>
+                      )}
+                    </TableCell>
+                    <TableCell>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="text-destructive hover:text-destructive hover:bg-destructive/10"
+                        onClick={() => handleRemoveRow(record.key)}
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    </TableCell>
+                  </TableRow>
+                );
+              })}
+            </TableBody>
+          </Table>
+          
+          <div className="p-4 border-t border-border">
+            <Button
+              variant="outline"
+              className="w-full border-dashed"
+              onClick={handleAddRow}
+            >
+              <Plus className="mr-2 h-4 w-4" />
               添加盘点行
             </Button>
-          )}
-        />
+          </div>
+        </CardContent>
       </Card>
     </div>
   );

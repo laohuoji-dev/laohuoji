@@ -1,8 +1,12 @@
 import { useEffect, useState } from 'react';
-import { Card, Row, Col, Statistic, Button, Spin, message } from 'antd';
-import { DollarOutlined, ShoppingCartOutlined, RiseOutlined, FileTextOutlined, DownloadOutlined } from '@ant-design/icons';
 import { invoke } from '@tauri-apps/api/core';
+import { DollarSign, ShoppingCart, TrendingUp, FileText, Download, Loader2, TrendingDown } from 'lucide-react';
+import { toast } from 'sonner';
+
 import { getTauriErrorMessage } from '../utils/tauriError';
+import { Button } from '../components/ui/button';
+import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
+import { cn } from '../lib/utils';
 
 interface ReportData {
   sales: number;
@@ -39,7 +43,7 @@ const Report = () => {
       setReport(data);
     } catch (error) {
       console.error('Failed to load report:', error);
-      message.error(getTauriErrorMessage(error) || '加载报告失败');
+      toast.error(getTauriErrorMessage(error) || '加载报告失败');
     } finally {
       setLoading(false);
     }
@@ -74,108 +78,135 @@ const Report = () => {
     a.download = `经营周报_${new Date().toISOString().slice(0, 10)}.txt`;
     a.click();
     URL.revokeObjectURL(url);
-    message.success('报告已导出');
+    toast.success('报告已导出');
   };
 
   if (loading) {
-    return <div style={{ textAlign: 'center', padding: 50 }}><Spin /></div>;
+    return (
+      <div className="flex justify-center items-center h-64">
+        <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+      </div>
+    );
   }
 
   if (!report) {
-    return <div style={{ textAlign: 'center', color: '#999' }}>暂无数据</div>;
+    return (
+      <div className="flex justify-center items-center h-64 text-muted-foreground">
+        暂无数据
+      </div>
+    );
   }
 
   const c = report.current;
   const p = report.previous;
 
+  const renderTrend = (change: string) => {
+    const isPositive = change.startsWith('+');
+    const isZero = change === '0%';
+    
+    if (isZero) return <span className="text-muted-foreground ml-2">({change})</span>;
+    
+    return (
+      <span className={cn("ml-2 flex items-center text-xs", isPositive ? "text-green-600" : "text-red-500")}>
+        {isPositive ? <TrendingUp className="h-3 w-3 mr-1" /> : <TrendingDown className="h-3 w-3 mr-1" />}
+        {change}
+      </span>
+    );
+  };
+
   return (
-    <div>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-        <h2>经营周报</h2>
-        <Button icon={<DownloadOutlined />} onClick={exportReport}>
+    <div className="space-y-6">
+      <div className="flex justify-between items-center">
+        <h2 className="text-2xl font-bold tracking-tight">经营周报</h2>
+        <Button onClick={exportReport}>
+          <Download className="mr-2 h-4 w-4" />
           导出报告
         </Button>
       </div>
-      <Row gutter={[16, 16]}>
-        <Col xs={24} sm={12} md={8}>
-          <Card>
-            <Statistic
-              title="本周销售额"
-              value={c.sales}
-              prefix={<DollarOutlined />}
-              precision={2}
-              suffix="元"
-              valueStyle={{ color: '#3f8600' }}
-            />
-            <div style={{ marginTop: 8, fontSize: 12, color: '#999' }}>
-              上周: ¥{p.sales.toFixed(2)} | 变化: {calcChange(c.sales, p.sales)}
+      
+      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">本周销售额</CardTitle>
+            <DollarSign className="h-4 w-4 text-muted-foreground" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold text-green-600">¥{c.sales.toFixed(2)}</div>
+            <div className="flex items-center mt-1">
+              <p className="text-xs text-muted-foreground">上周: ¥{p.sales.toFixed(2)}</p>
+              {renderTrend(calcChange(c.sales, p.sales))}
             </div>
-          </Card>
-        </Col>
-        <Col xs={24} sm={12} md={8}>
-          <Card>
-            <Statistic
-              title="本周采购额"
-              value={c.purchase}
-              prefix={<ShoppingCartOutlined />}
-              precision={2}
-              suffix="元"
-            />
-            <div style={{ marginTop: 8, fontSize: 12, color: '#999' }}>
-              上周: ¥{p.purchase.toFixed(2)} | 变化: {calcChange(c.purchase, p.purchase)}
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">本周采购额</CardTitle>
+            <ShoppingCart className="h-4 w-4 text-muted-foreground" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold">¥{c.purchase.toFixed(2)}</div>
+            <div className="flex items-center mt-1">
+              <p className="text-xs text-muted-foreground">上周: ¥{p.purchase.toFixed(2)}</p>
+              {renderTrend(calcChange(c.purchase, p.purchase))}
             </div>
-          </Card>
-        </Col>
-        <Col xs={24} sm={12} md={8}>
-          <Card>
-            <Statistic
-              title="本周利润"
-              value={c.profit}
-              prefix={<RiseOutlined />}
-              precision={2}
-              suffix="元"
-              valueStyle={{ color: c.profit >= 0 ? '#3f8600' : '#cf1322' }}
-            />
-            <div style={{ marginTop: 8, fontSize: 12, color: '#999' }}>
-              上周: ¥{p.profit.toFixed(2)} | 变化: {calcChange(c.profit, p.profit)}
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">本周利润</CardTitle>
+            <TrendingUp className="h-4 w-4 text-muted-foreground" />
+          </CardHeader>
+          <CardContent>
+            <div className={cn("text-2xl font-bold", c.profit >= 0 ? "text-green-600" : "text-red-500")}>
+              ¥{c.profit.toFixed(2)}
             </div>
-          </Card>
-        </Col>
-        <Col xs={24} sm={12} md={8}>
-          <Card>
-            <Statistic
-              title="新增商品"
-              value={c.new_products}
-              prefix={<FileTextOutlined />}
-              suffix="个"
-            />
-          </Card>
-        </Col>
-        <Col xs={24} sm={12} md={8}>
-          <Card>
-            <Statistic
-              title="入库单数"
-              value={c.inbound_count}
-              suffix="单"
-            />
-            <div style={{ marginTop: 8, fontSize: 12, color: '#999' }}>
-              上周: {p.inbound_count} 单 | 变化: {calcChange(c.inbound_count, p.inbound_count)}
+            <div className="flex items-center mt-1">
+              <p className="text-xs text-muted-foreground">上周: ¥{p.profit.toFixed(2)}</p>
+              {renderTrend(calcChange(c.profit, p.profit))}
             </div>
-          </Card>
-        </Col>
-        <Col xs={24} sm={12} md={8}>
-          <Card>
-            <Statistic
-              title="出库单数"
-              value={c.outbound_count}
-              suffix="单"
-            />
-            <div style={{ marginTop: 8, fontSize: 12, color: '#999' }}>
-              上周: {p.outbound_count} 单 | 变化: {calcChange(c.outbound_count, p.outbound_count)}
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">新增商品</CardTitle>
+            <FileText className="h-4 w-4 text-muted-foreground" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold">{c.new_products} <span className="text-sm font-normal text-muted-foreground">个</span></div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">入库单数</CardTitle>
+            <FileText className="h-4 w-4 text-muted-foreground" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold">{c.inbound_count} <span className="text-sm font-normal text-muted-foreground">单</span></div>
+            <div className="flex items-center mt-1">
+              <p className="text-xs text-muted-foreground">上周: {p.inbound_count} 单</p>
+              {renderTrend(calcChange(c.inbound_count, p.inbound_count))}
             </div>
-          </Card>
-        </Col>
-      </Row>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">出库单数</CardTitle>
+            <FileText className="h-4 w-4 text-muted-foreground" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold">{c.outbound_count} <span className="text-sm font-normal text-muted-foreground">单</span></div>
+            <div className="flex items-center mt-1">
+              <p className="text-xs text-muted-foreground">上周: {p.outbound_count} 单</p>
+              {renderTrend(calcChange(c.outbound_count, p.outbound_count))}
+            </div>
+          </CardContent>
+        </Card>
+      </div>
     </div>
   );
 };
