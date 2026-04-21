@@ -2062,4 +2062,339 @@ impl Database {
         tx.commit()?;
         Ok(count)
     }
+
+    /// 导出商品数据
+    pub fn export_products(&self, category: Option<&str>, status: Option<&str>) -> Result<Vec<serde_json::Value>, AppError> {
+        let mut query = String::from(
+            "SELECT id, name, category, unit, cost_price, sell_price, stock, barcode, status, min_stock, created_at, updated_at 
+             FROM products WHERE 1=1"
+        );
+        let mut params: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
+
+        if let Some(cat) = category {
+            if !cat.is_empty() {
+                query.push_str(" AND category = ?");
+                params.push(Box::new(cat));
+            }
+        }
+
+        if let Some(st) = status {
+            if !st.is_empty() {
+                query.push_str(" AND status = ?");
+                params.push(Box::new(st));
+            }
+        }
+
+        query.push_str(" ORDER BY id DESC");
+
+        let mut stmt = self.conn.prepare(&query)?;
+        let rows = stmt.query_map(rusqlite::params_from_iter(params.iter()), |row| {
+            Ok(serde_json::json!({
+                "id": row.get::<_, i64>(0)?,
+                "name": row.get::<_, String>(1)?,
+                "category": row.get::<_, Option<String>>(2)?,
+                "unit": row.get::<_, String>(3)?,
+                "cost_price": row.get::<_, f64>(4)?,
+                "sell_price": row.get::<_, f64>(5)?,
+                "stock": row.get::<_, i32>(6)?,
+                "barcode": row.get::<_, Option<String>>(7)?,
+                "status": row.get::<_, String>(8)?,
+                "min_stock": row.get::<_, i32>(9)?,
+                "created_at": row.get::<_, String>(10)?,
+                "updated_at": row.get::<_, String>(11)?,
+            }))
+        })?;
+
+        let mut products = Vec::new();
+        for row in rows {
+            products.push(row?);
+        }
+        Ok(products)
+    }
+
+    /// 导出库存快照
+    pub fn export_inventory(&self) -> Result<Vec<serde_json::Value>, AppError> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, name, category, unit, stock, cost_price, sell_price, barcode, status 
+             FROM products 
+             WHERE stock != 0 OR status = 'ACTIVE'
+             ORDER BY category, name"
+        )?;
+
+        let rows = stmt.query_map([], |row| {
+            Ok(serde_json::json!({
+                "id": row.get::<_, i64>(0)?,
+                "name": row.get::<_, String>(1)?,
+                "category": row.get::<_, Option<String>>(2)?,
+                "unit": row.get::<_, String>(3)?,
+                "stock": row.get::<_, i32>(4)?,
+                "cost_price": row.get::<_, f64>(5)?,
+                "sell_price": row.get::<_, f64>(6)?,
+                "barcode": row.get::<_, Option<String>>(7)?,
+                "status": row.get::<_, String>(8)?,
+            }))
+        })?;
+
+        let mut inventory = Vec::new();
+        for row in rows {
+            inventory.push(row?);
+        }
+        Ok(inventory)
+    }
+
+    /// 导出入库记录
+    pub fn export_inbound_records(
+        &self,
+        start_date: Option<&str>,
+        end_date: Option<&str>,
+    ) -> Result<Vec<serde_json::Value>, AppError> {
+        let mut query = String::from(
+            "SELECT o.id, o.product_id, p.name as product_name, o.quantity, o.price, o.total, o.supplier, o.created_at
+             FROM inbound_orders o
+             JOIN products p ON o.product_id = p.id
+             WHERE 1=1"
+        );
+        let mut params: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
+
+        let end_with_time;
+        if let (Some(start), Some(end)) = (start_date, end_date) {
+            end_with_time = format!("{} 23:59:59", end);
+            query.push_str(" AND o.created_at BETWEEN ? AND ?");
+            params.push(Box::new(start.to_string()));
+            params.push(Box::new(end_with_time));
+        }
+
+        query.push_str(" ORDER BY o.id DESC LIMIT 1000");
+
+        let mut stmt = self.conn.prepare(&query)?;
+        let rows = stmt.query_map(rusqlite::params_from_iter(params.iter()), |row| {
+            Ok(serde_json::json!({
+                "id": row.get::<_, i64>(0)?,
+                "product_id": row.get::<_, i64>(1)?,
+                "product_name": row.get::<_, String>(2)?,
+                "quantity": row.get::<_, i32>(3)?,
+                "price": row.get::<_, f64>(4)?,
+                "total": row.get::<_, f64>(5)?,
+                "supplier": row.get::<_, Option<String>>(6)?,
+                "created_at": row.get::<_, String>(7)?,
+            }))
+        })?;
+
+        let mut records = Vec::new();
+        for row in rows {
+            records.push(row?);
+        }
+        Ok(records)
+    }
+
+    /// 导出出库记录
+    pub fn export_outbound_records(
+        &self,
+        start_date: Option<&str>,
+        end_date: Option<&str>,
+    ) -> Result<Vec<serde_json::Value>, AppError> {
+        let mut query = String::from(
+            "SELECT o.id, o.product_id, p.name as product_name, o.quantity, o.price, o.total, o.customer, o.created_at
+             FROM outbound_orders o
+             JOIN products p ON o.product_id = p.id
+             WHERE 1=1"
+        );
+        let mut params: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
+
+        let end_with_time;
+        if let (Some(start), Some(end)) = (start_date, end_date) {
+            end_with_time = format!("{} 23:59:59", end);
+            query.push_str(" AND o.created_at BETWEEN ? AND ?");
+            params.push(Box::new(start.to_string()));
+            params.push(Box::new(end_with_time));
+        }
+
+        query.push_str(" ORDER BY o.id DESC LIMIT 1000");
+
+        let mut stmt = self.conn.prepare(&query)?;
+        let rows = stmt.query_map(rusqlite::params_from_iter(params.iter()), |row| {
+            Ok(serde_json::json!({
+                "id": row.get::<_, i64>(0)?,
+                "product_id": row.get::<_, i64>(1)?,
+                "product_name": row.get::<_, String>(2)?,
+                "quantity": row.get::<_, i32>(3)?,
+                "price": row.get::<_, f64>(4)?,
+                "total": row.get::<_, f64>(5)?,
+                "customer": row.get::<_, Option<String>>(6)?,
+                "created_at": row.get::<_, String>(7)?,
+            }))
+        })?;
+
+        let mut records = Vec::new();
+        for row in rows {
+            records.push(row?);
+        }
+        Ok(records)
+    }
+
+    /// 批量更新价格
+    pub fn batch_update_prices(
+        &mut self,
+        product_ids: Vec<i64>,
+        price_type: &str,  // "cost" or "sell"
+        adjustment_type: &str,  // "percent" or "fixed"
+        adjustment_value: f64,
+    ) -> Result<usize, AppError> {
+        let tx = self.conn.transaction()?;
+        let mut count = 0;
+
+        for product_id in product_ids {
+            let column = if price_type == "cost" { "cost_price" } else { "sell_price" };
+            
+            let current_price: f64 = match tx.query_row(
+                &format!("SELECT {} FROM products WHERE id = ?", column),
+                params![product_id],
+                |row| row.get(0),
+            ) {
+                Ok(price) => price,
+                Err(_) => continue,
+            };
+
+            let new_price = if adjustment_type == "percent" {
+                current_price * (1.0 + adjustment_value / 100.0)
+            } else {
+                current_price + adjustment_value
+            };
+
+            // 确保价格不为负
+            let final_price = if new_price < 0.0 { 0.0 } else { new_price };
+
+            tx.execute(
+                &format!("UPDATE products SET {} = ?, updated_at = datetime('now', 'localtime') WHERE id = ?", column),
+                params![final_price, product_id],
+            )?;
+
+            count += 1;
+        }
+
+        tx.commit()?;
+        Ok(count)
+    }
+
+    /// 批量更新价格（简化版：直接设置新价格）
+    pub fn batch_update_prices_simple(
+        &mut self,
+        product_ids: &[i64],
+        new_prices: &[f64],
+    ) -> Result<usize, AppError> {
+        let tx = self.conn.transaction()?;
+        let mut count = 0;
+
+        for (i, product_id) in product_ids.iter().enumerate() {
+            let new_price = if new_prices[i] < 0.0 { 0.0 } else { new_prices[i] };
+
+            tx.execute(
+                "UPDATE products SET sell_price = ?, updated_at = datetime('now', 'localtime') WHERE id = ?",
+                params![new_price, product_id],
+            )?;
+
+            count += 1;
+        }
+
+        tx.commit()?;
+        Ok(count)
+    }
+
+    /// 通过条码查询商品
+    pub fn get_product_by_barcode(&self, barcode: &str) -> Result<Option<serde_json::Value>, AppError> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, name, category, unit, cost_price, sell_price, stock, barcode, status, min_stock, created_at, updated_at 
+             FROM products 
+             WHERE barcode = ? AND status = 'ACTIVE'"
+        )?;
+
+        let result = stmt.query_row(params![barcode], |row| {
+            Ok(serde_json::json!({
+                "id": row.get::<_, i64>(0)?,
+                "name": row.get::<_, String>(1)?,
+                "category": row.get::<_, Option<String>>(2)?,
+                "unit": row.get::<_, String>(3)?,
+                "cost_price": row.get::<_, f64>(4)?,
+                "sell_price": row.get::<_, f64>(5)?,
+                "stock": row.get::<_, i32>(6)?,
+                "barcode": row.get::<_, Option<String>>(7)?,
+                "status": row.get::<_, String>(8)?,
+                "min_stock": row.get::<_, i32>(9)?,
+                "created_at": row.get::<_, String>(10)?,
+                "updated_at": row.get::<_, String>(11)?,
+            }))
+        });
+
+        match result {
+            Ok(product) => Ok(Some(product)),
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            Err(e) => Err(AppError::new("QUERY_ERROR", e.to_string())),
+        }
+    }
+
+    /// 获取备份文件列表
+    pub fn get_backup_list(&self, app_handle: &tauri::AppHandle) -> Result<Vec<serde_json::Value>, AppError> {
+        use std::fs;
+        
+        let app_dir = app_handle
+            .path()
+            .app_data_dir()
+            .map_err(|e| AppError::new("PATH_ERROR", e.to_string()))?;
+        
+        let backups_dir = app_dir.join("auto_backups");
+        let mut backups = Vec::new();
+
+        if backups_dir.exists() {
+            if let Ok(entries) = fs::read_dir(&backups_dir) {
+                for entry in entries.flatten() {
+                    let path = entry.path();
+                    if path.extension().map_or(false, |ext| ext == "db") {
+                        if let Ok(metadata) = fs::metadata(&path) {
+                            let name = path.file_name()
+                                .and_then(|n| n.to_str())
+                                .unwrap_or("")
+                                .to_string();
+                            let size = metadata.len();
+                            let modified = metadata.modified()
+                                .ok()
+                                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                                .map(|d| d.as_millis() as i64)
+                                .unwrap_or(0);
+                            
+                            backups.push(serde_json::json!({
+                                "name": name,
+                                "path": path.to_string_lossy().to_string(),
+                                "size": size,
+                                "modified": modified,
+                            }));
+                        }
+                    }
+                }
+            }
+        }
+
+        // 按修改时间倒序排序
+        backups.sort_by(|a, b| {
+            let a_time = a["modified"].as_i64().unwrap_or(0);
+            let b_time = b["modified"].as_i64().unwrap_or(0);
+            b_time.cmp(&a_time)
+        });
+
+        Ok(backups)
+    }
+
+    /// 删除备份文件
+    pub fn delete_backup(&self, backup_path: &str) -> Result<(), AppError> {
+        use std::fs;
+        
+        // 安全检查：确保路径在应用数据目录内
+        if !backup_path.contains("auto_backups") || !backup_path.ends_with(".db") {
+            return Err(AppError::new("INVALID_BACKUP_PATH", "无效的备份文件路径".to_string()));
+        }
+
+        fs::remove_file(backup_path)
+            .map_err(|e| AppError::new("DELETE_ERROR", format!("删除失败：{}", e)))?;
+        
+        Ok(())
+    }
 }
