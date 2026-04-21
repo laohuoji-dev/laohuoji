@@ -779,6 +779,54 @@ async fn get_inventory_logs(
 }
 
 #[tauri::command]
+async fn batch_update_prices(
+    updates: Vec<serde_json::Value>,
+    state: State<'_, AppState>,
+) -> Result<usize, AppError> {
+    let db_guard = state
+        .db
+        .lock()
+        .map_err(|e| AppError::new("LOCK_ERROR", e.to_string()))?;
+    let db = db_guard
+        .as_ref()
+        .ok_or_else(|| AppError::new("DB_NOT_INIT", "数据库未初始化"))?;
+
+    // 解析更新数据：[{id: 1, newPrice: 99.99}, ...]
+    let product_ids: Vec<i64> = updates
+        .iter()
+        .filter_map(|v| v.get("id").and_then(|id| id.as_i64()))
+        .collect();
+    
+    let new_prices: Vec<f64> = updates
+        .iter()
+        .filter_map(|v| v.get("newPrice").and_then(|p| p.as_f64()))
+        .collect();
+
+    if product_ids.len() != new_prices.len() {
+        return Err(AppError::new("INVALID_DATA", "更新数据格式错误"));
+    }
+
+    db.batch_update_prices_simple(&product_ids, &new_prices)
+}
+
+#[tauri::command]
+async fn export_products(
+    category: Option<String>,
+    status: Option<String>,
+    state: State<'_, AppState>,
+) -> Result<Vec<serde_json::Value>, AppError> {
+    let db_guard = state
+        .db
+        .lock()
+        .map_err(|e| AppError::new("LOCK_ERROR", e.to_string()))?;
+    let db = db_guard
+        .as_ref()
+        .ok_or_else(|| AppError::new("DB_NOT_INIT", "数据库未初始化"))?;
+
+    db.export_products(category.as_deref(), status.as_deref())
+}
+
+#[tauri::command]
 async fn backup_database(
     target_path: String,
     app_handle: tauri::AppHandle,
@@ -878,6 +926,8 @@ pub fn run() {
             delete_supplier,
             import_products,
             batch_update_stock,
+            batch_update_prices,
+            export_products,
             add_payment,
             get_financial_logs,
         ])

@@ -63,7 +63,9 @@ import {
 import { Badge } from '@/components/ui/badge';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { toast } from 'sonner';
-import { Plus, Search, Upload, Download, Edit, Trash2, HelpCircle, ChevronLeft, ChevronRight, Loader2 } from 'lucide-react';
+import { Plus, Search, Upload, Download, Edit, Trash2, HelpCircle, ChevronLeft, ChevronRight, Loader2, TrendingUp, HardDrive } from 'lucide-react';
+import { BatchPriceChange } from '@/components/BatchPriceChange';
+import { BackupManager } from '@/components/BackupManager';
 
 interface Product {
   id: number;
@@ -104,6 +106,8 @@ const Products = () => {
   const [lowStockThreshold, setLowStockThreshold] = useState<number>(10);
   const [categories, setCategories] = useState<Category[]>([]);
   const [units, setUnits] = useState<Unit[]>([]);
+  const [batchPriceModalOpen, setBatchPriceModalOpen] = useState(false);
+  const [backupModalOpen, setBackupModalOpen] = useState(false);
 
   const form = useForm<FormValues>({
     resolver: zodResolver(formSchema) as any,
@@ -459,6 +463,12 @@ const Products = () => {
           </Button>
           <Button variant="outline" onClick={exportToExcel}>
             <Download className="mr-2 h-4 w-4" /> 导出
+          </Button>
+          <Button variant="outline" onClick={() => setBatchPriceModalOpen(true)}>
+            <TrendingUp className="mr-2 h-4 w-4" /> 批量改价
+          </Button>
+          <Button variant="outline" onClick={() => setBackupModalOpen(true)}>
+            <HardDrive className="mr-2 h-4 w-4" /> 备份恢复
           </Button>
         </div>
       </div>
