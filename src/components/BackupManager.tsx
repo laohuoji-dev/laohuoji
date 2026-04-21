@@ -1,7 +1,6 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { invoke } from '@tauri-apps/api/core';
-import { save, open } from '@tauri-apps/plugin-dialog';
-import { writeFile, readFile, exists } from '@tauri-apps/plugin-fs';
+import { save, open as openDialog } from '@tauri-apps/plugin-dialog';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import {
@@ -12,7 +11,6 @@ import {
   DialogDescription,
   DialogFooter,
 } from '@/components/ui/dialog';
-import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
 import {
@@ -22,7 +20,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { Backup, Download, Upload, RotateCcw, HardDrive, Loader2 } from 'lucide-react';
+import { Database, Download, Upload, RotateCcw, Loader2 } from 'lucide-react';
 
 interface BackupManagerProps {
   open: boolean;
@@ -35,11 +33,11 @@ export const BackupManager = ({ open, onOpenChange }: BackupManagerProps) => {
   const [backupDays, setBackupDays] = useState(7);
   const [lastBackupPath, setLastBackupPath] = useState<string>('');
 
-  useState(() => {
+  useEffect(() => {
     if (open) {
       loadBackupConfig();
     }
-  });
+  }, [open]);
 
   const loadBackupConfig = async () => {
     try {
@@ -75,7 +73,7 @@ export const BackupManager = ({ open, onOpenChange }: BackupManagerProps) => {
 
   const handleRestore = async () => {
     try {
-      const filePath = await open({
+      const filePath = await openDialog({
         title: '选择要恢复的备份文件',
         filters: [{ name: 'Database', extensions: ['db'] }],
         multiple: false,
@@ -118,7 +116,7 @@ export const BackupManager = ({ open, onOpenChange }: BackupManagerProps) => {
       <DialogContent className="sm:max-w-[500px]">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
-            <HardDrive className="h-5 w-5" />
+            <Database className="h-5 w-5" />
             数据备份与恢复
           </DialogTitle>
           <DialogDescription>

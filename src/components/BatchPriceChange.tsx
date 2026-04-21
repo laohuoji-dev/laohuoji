@@ -1,6 +1,6 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { invoke } from '@tauri-apps/api/core';
-import { useForm, useFieldArray } from 'react-hook-form';
+import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import { toast } from 'sonner';
@@ -39,7 +39,7 @@ import {
 } from '@/components/ui/table';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Badge } from '@/components/ui/badge';
-import { Loader2, TrendingUp, Tag, X } from 'lucide-react';
+import { Loader2, TrendingUp } from 'lucide-react';
 
 interface Product {
   id: number;
@@ -80,7 +80,7 @@ export const BatchPriceChange = ({
   const [showPreview, setShowPreview] = useState(false);
 
   const form = useForm<FormValues>({
-    resolver: zodResolver(formSchema),
+    resolver: zodResolver(formSchema) as any,
     defaultValues: {
       mode: 'category',
       category: '',
@@ -123,7 +123,7 @@ export const BatchPriceChange = ({
   };
 
   // 更新预览数据
-  useState(() => {
+  useEffect(() => {
     const targets = getTargetProducts();
     const preview = targets.map((p) => ({
       ...p,
@@ -132,7 +132,7 @@ export const BatchPriceChange = ({
       change: calculateNewPrice(p.sell_price) - p.sell_price,
     }));
     setPreviewData(preview);
-  });
+  }, [watchMode, watchCategory, watchPriceMode, watchPriceValue]);
 
   const handlePreview = () => {
     const targets = getTargetProducts();
@@ -143,7 +143,7 @@ export const BatchPriceChange = ({
     setShowPreview(true);
   };
 
-  const onSubmit = async (values: FormValues) => {
+  const onSubmit = async (_values: FormValues) => {
     const targets = getTargetProducts();
     if (targets.length === 0) {
       toast.warning('没有符合条件的商品');
@@ -392,7 +392,7 @@ export const BatchPriceChange = ({
             <Button
               onClick={() => {
                 setShowPreview(false);
-                form.handleSubmit(onSubmit)();
+                form.handleSubmit(onSubmit as any)();
               }}
               className="bg-blue-600 hover:bg-blue-700"
             >

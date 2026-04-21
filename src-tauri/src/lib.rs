@@ -783,12 +783,12 @@ async fn batch_update_prices(
     updates: Vec<serde_json::Value>,
     state: State<'_, AppState>,
 ) -> Result<usize, AppError> {
-    let db_guard = state
+    let mut db_guard = state
         .db
         .lock()
         .map_err(|e| AppError::new("LOCK_ERROR", e.to_string()))?;
     let db = db_guard
-        .as_ref()
+        .as_mut()
         .ok_or_else(|| AppError::new("DB_NOT_INIT", "数据库未初始化"))?;
 
     // 解析更新数据：[{id: 1, newPrice: 99.99}, ...]

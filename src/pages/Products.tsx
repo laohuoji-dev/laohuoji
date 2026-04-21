@@ -725,6 +725,19 @@ const Products = () => {
           </Form>
         </DialogContent>
       </Dialog>
+
+      <BatchPriceChange
+        open={batchPriceModalOpen}
+        onOpenChange={setBatchPriceModalOpen}
+        onSuccess={loadProducts}
+        products={products}
+        categories={categories.map(c => c.name)}
+      />
+
+      <BackupManager
+        open={backupModalOpen}
+        onOpenChange={setBackupModalOpen}
+      />
     </div>
   );
 };
